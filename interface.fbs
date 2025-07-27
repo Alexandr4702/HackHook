@@ -1,0 +1,59 @@
+namespace Interface;
+
+attribute "priority";
+
+enum CommandID : byte {
+  UNSPECIFIED = 0,
+  WRITE = 1,
+  READ,
+  READ_ACK,
+  FIND,
+  FIND_ACK,
+  ACK
+}
+
+table WriteCommand {
+  offset: ulong;
+  data: [ubyte];
+}
+
+table ReadCommand {
+  offset: ulong;
+  size: ulong;
+}
+
+table ReadAck {
+  offset: ulong;
+  size: ulong;
+}
+
+table FindCommand {
+  offset: ulong;
+  size: ulong;
+}
+
+table FindAck {
+  offset: ulong;
+  size: ulong;
+}
+
+table Ack
+{
+  status: bool;
+}
+
+union Command {
+  WriteCommand,
+  ReadCommand,
+  ReadAck,
+  FindCommand,
+  FindAck,
+  Ack
+}
+
+table CommandEnvelope {
+  id: CommandID; 
+  body: Command;
+}
+
+root_type CommandEnvelope;
