@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>800</width><height>600</height></rect>
+  </property>
+  <property name="windowTitle">
+   <string>Memory Scanner</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0,1,1">
+
+    <!-- Window selector -->
+    <item>
+     <layout class="QHBoxLayout" name="windowSelectionLayout">
+      <item>
+       <widget class="QLabel" name="targetWindowLabel">
+        <property name="text"><string>Target window:</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="WindowSelectorCombo" name="windowSelectorCombo">
+        <property name="editable"><bool>true</bool></property>
+        <property name="minimumWidth"><number>300</number></property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+
+    <!-- Scan input -->
+    <item>
+     <layout class="QHBoxLayout" name="searchLayout">
+      <item>
+       <widget class="QLineEdit" name="valueEdit">
+        <property name="placeholderText">
+         <string>Enter value to scan</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="valueTypeCombo">
+        <item><property name="text"><string>Int32</string></property></item>
+        <item><property name="text"><string>Float</string></property></item>
+        <item><property name="text"><string>Double</string></property></item>
+        <item><property name="text"><string>Int64</string></property></item>
+        <item><property name="text"><string>String</string></property></item>
+        <item><property name="text"><string>ByteArray</string></property></item>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="firstScanButton">
+        <property name="text"><string>First Scan</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="nextScanButton">
+        <property name="text"><string>Next Scan</string></property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+
+    <!-- Results table -->
+    <item>
+     <widget class="QTableWidget" name="resultsTable">
+      <property name="columnCount"><number>2</number></property>
+      <column>
+       <property name="text"><string>Address</string></property>
+      </column>
+      <column>
+       <property name="text"><string>Value</string></property>
+      </column>
+     </widget>
+    </item>
+
+    <!-- Watchlist -->
+    <item>
+     <widget class="QGroupBox" name="watchlistGroup">
+      <property name="title"><string>Watchlist</string></property>
+      <layout class="QVBoxLayout">
+       <item>
+        <widget class="QTableWidget" name="watchlistTable">
+         <property name="columnCount"><number>2</number></property>
+         <column>
+          <property name="text"><string>Address</string></property>
+         </column>
+         <column>
+          <property name="text"><string>Value</string></property>
+         </column>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
+
+   </layout>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
