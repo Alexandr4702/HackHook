@@ -2,6 +2,8 @@
 
 #include <QMainWindow>
 #include "WindowSelectorCombo.h"
+#include "injector/Injector.h"
+#include "common/utility.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -20,7 +22,10 @@ public:
     
     private slots:
     void onWindowSelectorOpened();
+    void on_hookButton_clicked();
 
 private:
     Ui::MainWindow *ui;
+    Injector m_injector;
+    MessageIPCSender m_sender;
 };

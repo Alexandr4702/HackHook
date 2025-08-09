@@ -41,6 +41,10 @@ struct SharedBuffer
 
     bool produce_block(std::span<const uint8_t> src)
     {
+        if(m_buf == nullptr)
+        {
+            return false;
+        }
         bip::scoped_lock lock(m_buf->mutex);
         m_buf->not_full.wait(lock, [&]
                              { return m_buf->available_space() >= src.size() || m_buf->closed; });
@@ -68,6 +72,10 @@ struct SharedBuffer
 
     bool consume_block(std::span<uint8_t> dest)
     {
+        if(m_buf == nullptr)
+        {
+            return false;
+        }
         bip::scoped_lock lock(m_buf->mutex);
         m_buf->not_empty.wait(lock, [&]
                               { return m_buf->count >= dest.size() || m_buf->closed; });
@@ -95,6 +103,10 @@ struct SharedBuffer
 
     void close()
     {
+        if(m_buf == nullptr)
+        {
+            return;
+        }
         bip::scoped_lock lock(m_buf->mutex);
         m_buf->closed = true;
         m_buf->not_empty.notify_all();

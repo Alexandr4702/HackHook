@@ -3,7 +3,7 @@
 #include <windows.h>
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), ui(new Ui::MainWindow)
+    : QMainWindow(parent), ui(new Ui::MainWindow), m_sender(BUFFER_NAME_TX, true)
 {
     ui->setupUi(this);
     connect(ui->windowSelectorCombo, &WindowSelectorCombo::aboutToShowPopup, this, &MainWindow::onWindowSelectorOpened);
@@ -52,4 +52,21 @@ void MainWindow::onWindowSelectorOpened()
         combo->addItem(QString::fromStdWString(title));
         return TRUE;
     }, reinterpret_cast<LPARAM>(ui->windowSelectorCombo));
+}
+
+
+void MainWindow::on_hookButton_clicked()
+{
+    if (!m_injector.isHooked()) {
+        std::wstring windowName = ui->windowSelectorCombo->currentText().toStdWString();
+        qDebug() << "hookInjected " << windowName;
+        if(windowName.empty())
+            return;
+        if(m_injector.hook(windowName))
+            ui->hookButton->setText("Unhook");
+    } else {
+        m_injector.unhook();
+        qDebug() << "unooked";
+        ui->hookButton->setText("Inject Hook");
+    }
 }

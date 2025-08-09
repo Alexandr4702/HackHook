@@ -20,3 +20,8 @@ void MessageIPCSender::send(std::span<const uint8_t> bytes)
 
     SharedBufferTx.produce_block(m_buffer);
 }
+
+void MessageIPCSender::close()
+{
+    SharedBufferTx.close();
+}
