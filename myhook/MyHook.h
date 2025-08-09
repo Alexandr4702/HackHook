@@ -1,13 +1,13 @@
 #ifndef MYHOOK_H_
 #define MYHOOK_H_
 
-#include <atomic>
 #include "common/common.h"
 #include "common/utility.h"
+#include <atomic>
 
 class MyHook
 {
-public:
+  public:
     static MyHook &getInstance()
     {
         static MyHook instance;
@@ -18,7 +18,7 @@ public:
     void start();
     void stop();
 
-private:
+  private:
     ~MyHook() = default;
     MyHook(const MyHook &) = delete;
     MyHook &operator=(const MyHook &) = delete;

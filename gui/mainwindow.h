@@ -1,30 +1,32 @@
 #pragma once
 
-#include <QMainWindow>
 #include "WindowSelectorCombo.h"
-#include "injector/Injector.h"
 #include "common/utility.h"
+#include "injector/Injector.h"
+#include <QMainWindow>
 
 QT_BEGIN_NAMESPACE
-namespace Ui { class MainWindow; }
+namespace Ui
+{
+class MainWindow;
+}
 QT_END_NAMESPACE
 
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
-public:
+  public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
     void refreshWindowList();
 
-    
-    private slots:
+  private slots:
     void onWindowSelectorOpened();
     void on_hookButton_clicked();
 
-private:
+  private:
     Ui::MainWindow *ui;
     Injector m_injector;
     MessageIPCSender m_sender;

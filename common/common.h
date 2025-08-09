@@ -1,8 +1,8 @@
 #ifndef COMMON_COMMON_H
 #define COMMON_COMMON_H
-#include <string>
-#include "shared_buffer.hpp"
 #include "interface_generated.h"
+#include "shared_buffer.hpp"
+#include <string>
 
 // const std::wstring WINDOW_TITLE = L"*Untitled - Notepad";
 const std::wstring WINDOW_TITLE = L"Lineage2M l Katzman";

@@ -4,14 +4,15 @@
 class WindowSelectorCombo : public QComboBox
 {
     Q_OBJECT
-public:
+  public:
     using QComboBox::QComboBox;
 
-signals:
+  signals:
     void aboutToShowPopup();
 
-protected:
-    void showPopup() override {
+  protected:
+    void showPopup() override
+    {
         emit aboutToShowPopup();
         QComboBox::showPopup();
     }

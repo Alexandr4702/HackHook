@@ -4,11 +4,11 @@
 #include <condition_variable>
 #include <mutex>
 
-template<typename T, std::size_t Capacity>
-class RingBuffer
+template <typename T, std::size_t Capacity> class RingBuffer
 {
-public:
-    struct Buffer {
+  public:
+    struct Buffer
+    {
         std::mutex mutex;
         std::condition_variable not_empty;
         std::condition_variable not_full;
@@ -24,6 +24,4 @@ public:
     ~RingBuffer() = default;
 };
 
-
 #endif // RING_BUFFER_HPP
-
