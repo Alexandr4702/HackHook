@@ -25,3 +25,8 @@ void MessageIPCSender::close()
 {
     SharedBufferTx.close();
 }
+
+void MessageIPCSender::reset()
+{
+    SharedBufferTx.reset();
+}

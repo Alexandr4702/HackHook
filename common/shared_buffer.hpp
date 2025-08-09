@@ -1,20 +1,18 @@
 #ifndef SHARED_BUFFER_HPP
 #define SHARED_BUFFER_HPP
 
-#include <boost/interprocess/managed_shared_memory.hpp>
-#include <boost/interprocess/sync/interprocess_mutex.hpp>
-#include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/allocators/allocator.hpp>
 #include <boost/interprocess/containers/vector.hpp>
+#include <boost/interprocess/managed_shared_memory.hpp>
+#include <boost/interprocess/sync/interprocess_condition.hpp>
+#include <boost/interprocess/sync/interprocess_mutex.hpp>
 
 namespace bip = boost::interprocess;
 
-template <std::size_t Capacity>
-struct SharedBuffer
+template <std::size_t Capacity> struct SharedBuffer
 {
 
-    SharedBuffer(const std::string &shm_name, bool create)
-        : m_shm_name(shm_name), m_creator(create)
+    SharedBuffer(const std::string &shm_name, bool create) : m_shm_name(shm_name), m_creator(create)
     {
         if (create)
         {
@@ -37,19 +35,18 @@ struct SharedBuffer
         {
             bip::shared_memory_object::remove(m_shm_name.c_str());
         }
-    }   
+    }
 
     bool produce_block(std::span<const uint8_t> src)
     {
-        if(m_buf == nullptr)
+        if (m_buf == nullptr)
         {
             return false;
         }
         bip::scoped_lock lock(m_buf->mutex);
-        m_buf->not_full.wait(lock, [&]
-                             { return m_buf->available_space() >= src.size() || m_buf->closed; });
-        
-        if(!(m_buf->available_space() >= src.size()))
+        m_buf->not_full.wait(lock, [&] { return m_buf->available_space() >= src.size() || m_buf->closed; });
+
+        if (!(m_buf->available_space() >= src.size()))
         {
             return false;
         }
@@ -72,15 +69,14 @@ struct SharedBuffer
 
     bool consume_block(std::span<uint8_t> dest)
     {
-        if(m_buf == nullptr)
+        if (m_buf == nullptr)
         {
             return false;
         }
         bip::scoped_lock lock(m_buf->mutex);
-        m_buf->not_empty.wait(lock, [&]
-                              { return m_buf->count >= dest.size() || m_buf->closed; });
-        
-        if(!(m_buf->count >= dest.size()))
+        m_buf->not_empty.wait(lock, [&] { return m_buf->count >= dest.size() || m_buf->closed; });
+
+        if (!(m_buf->count >= dest.size()))
         {
             return false;
         }
@@ -103,7 +99,7 @@ struct SharedBuffer
 
     void close()
     {
-        if(m_buf == nullptr)
+        if (m_buf == nullptr)
         {
             return;
         }
@@ -113,7 +109,20 @@ struct SharedBuffer
         m_buf->not_full.notify_all();
     }
 
-private:
+    void reset()
+    {
+        if (m_buf == nullptr)
+        {
+            return;
+        }
+        bip::scoped_lock lock(m_buf->mutex);
+        m_buf->closed = false;
+        m_buf->head = 0;
+        m_buf->tail = 0;
+        m_buf->count = 0;
+    }
+
+  private:
     struct Buffer
     {
         bip::interprocess_mutex mutex;
@@ -129,7 +138,10 @@ private:
 
         Buffer() = default;
 
-        size_t available_space() const { return Capacity - count; }
+        size_t available_space() const
+        {
+            return Capacity - count;
+        }
     };
 
     std::string m_shm_name;

@@ -84,6 +84,7 @@ public:
     ~MessageIPCSender();
     void send(std::span<const uint8_t> bytes);
     void close();
+    void reset();
 
 private:
     std::mutex m_mutex;

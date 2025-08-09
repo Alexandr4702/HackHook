@@ -63,9 +63,13 @@ void MainWindow::on_hookButton_clicked()
         if(windowName.empty())
             return;
         if(m_injector.hook(windowName))
+        {
             ui->hookButton->setText("Unhook");
+            m_sender.reset();
+        }
     } else {
         m_injector.unhook();
+        m_sender.close();
         qDebug() << "unooked";
         ui->hookButton->setText("Inject Hook");
     }
