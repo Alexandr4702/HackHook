@@ -9,7 +9,9 @@ enum CommandID : byte {
   READ_ACK,
   FIND,
   FIND_ACK,
-  ACK
+  DUMP,
+  ACK,
+  NACK,
 }
 
 table WriteCommand {

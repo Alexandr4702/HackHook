@@ -2,89 +2,180 @@
 <ui version="4.0">
  <class>MainWindow</class>
  <widget class="QMainWindow" name="MainWindow">
-  <property name="geometry"><rect><x>0</x><y>0</y><width>800</width><height>600</height></rect></property>
-  <property name="windowTitle"><string>Memory Scanner</string></property>
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>800</width>
+    <height>600</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Memory Scanner</string>
+  </property>
   <widget class="QWidget" name="centralwidget">
    <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0,0,1,1">
-
-    <!-- Window selector -->
     <item>
      <layout class="QHBoxLayout" name="windowSelectionLayout">
-      <item><widget class="QLabel" name="targetWindowLabel">
-        <property name="text"><string>Target window:</string></property>
-      </widget></item>
-      <item><widget class="WindowSelectorCombo" name="windowSelectorCombo">
-        <property name="editable"><bool>true</bool></property>
-        <property name="minimumWidth"><number>300</number></property>
-      </widget></item>
+      <item>
+       <widget class="QLabel" name="targetWindowLabel">
+        <property name="text">
+         <string>Target window:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="WindowSelectorCombo" name="windowSelectorCombo" native="true">
+        <property name="editable" stdset="0">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
      </layout>
     </item>
-
-    <!-- Hook button centered -->
     <item>
      <layout class="QHBoxLayout" name="hookLayout">
-      <item><spacer name="hookSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property>
-        <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer>
+      <item>
+       <widget class="QPushButton" name="hookButton">
+        <property name="text">
+         <string>Inject Hook</string>
+        </property>
+       </widget>
       </item>
-      <item><widget class="QPushButton" name="hookButton">
-        <property name="text"><string>Inject Hook</string></property>
-        <property name="minimumWidth"><number>120</number></property>
-      </widget></item>
-      <item><spacer name="hookSpacerRight"><property name="orientation"><enum>Qt::Horizontal</enum></property>
-        <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer>
+      <item>
+       <widget class="QPushButton" name="dumpButton">
+        <property name="text">
+         <string>Dump</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="hookSpacerRight">
+        <property name="orientation">
+         <enum>Qt::Orientation::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>40</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
       </item>
      </layout>
     </item>
-
-    <!-- Scan controls -->
     <item>
      <layout class="QHBoxLayout" name="searchLayout">
-      <item><widget class="QLineEdit" name="valueEdit">
-        <property name="placeholderText"><string>Enter value to scan</string></property>
-      </widget></item>
-      <item><widget class="QComboBox" name="valueTypeCombo">
-        <item><property name="text"><string>Int32</string></property></item>
-        <item><property name="text"><string>Float</string></property></item>
-        <item><property name="text"><string>Double</string></property></item>
-        <item><property name="text"><string>Int64</string></property></item>
-        <item><property name="text"><string>String</string></property></item>
-        <item><property name="text"><string>ByteArray</string></property></item>
-      </widget></item>
-      <item><widget class="QPushButton" name="firstScanButton">
-        <property name="text"><string>First Scan</string></property>
-      </widget></item>
-      <item><widget class="QPushButton" name="nextScanButton">
-        <property name="text"><string>Next Scan</string></property>
-      </widget></item>
+      <item>
+       <widget class="QLineEdit" name="valueEdit">
+        <property name="placeholderText">
+         <string>Enter value to scan</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="valueTypeCombo">
+        <item>
+         <property name="text">
+          <string>Int32</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Float</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Double</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Int64</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>String</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>ByteArray</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="firstScanButton">
+        <property name="text">
+         <string>First Scan</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="nextScanButton">
+        <property name="text">
+         <string>Next Scan</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </item>
-
-    <!-- Results table -->
     <item>
      <widget class="QTableWidget" name="resultsTable">
-      <property name="columnCount"><number>2</number></property>
-      <column><property name="text"><string>Address</string></property></column>
-      <column><property name="text"><string>Value</string></property></column>
+      <property name="columnCount">
+       <number>2</number>
+      </property>
+      <column>
+       <property name="text">
+        <string>Address</string>
+       </property>
+      </column>
+      <column>
+       <property name="text">
+        <string>Value</string>
+       </property>
+      </column>
      </widget>
     </item>
-
-    <!-- Watchlist -->
     <item>
      <widget class="QGroupBox" name="watchlistGroup">
-      <property name="title"><string>Watchlist</string></property>
+      <property name="title">
+       <string>Watchlist</string>
+      </property>
       <layout class="QVBoxLayout">
-       <item><widget class="QTableWidget" name="watchlistTable">
-         <property name="columnCount"><number>2</number></property>
-         <column><property name="text"><string>Address</string></property></column>
-         <column><property name="text"><string>Value</string></property></column>
-       </widget></item>
+       <item>
+        <widget class="QTableWidget" name="watchlistTable">
+         <property name="columnCount">
+          <number>2</number>
+         </property>
+         <column>
+          <property name="text">
+           <string>Address</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>Value</string>
+          </property>
+         </column>
+        </widget>
+       </item>
       </layout>
      </widget>
     </item>
-
    </layout>
   </widget>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>WindowSelectorCombo</class>
+   <extends>QWidget</extends>
+   <header>windowselectorcombo.h</header>
+  </customwidget>
+ </customwidgets>
  <resources/>
  <connections/>
 </ui>

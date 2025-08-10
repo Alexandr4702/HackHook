@@ -1,3 +1,4 @@
+#include <atomic>
 #include <fstream>
 #include <thread>
 #include <string>
@@ -59,7 +60,7 @@ struct SectionInfo
     std::string sectionName;
 };
 
-MyHook::MyHook()
+MyHook::MyHook(): m_reciver(BUFFER_NAME_TX, false), m_sender(BUFFER_NAME_RX, false)
 {
     // std::string folderName = g_params.logDumpLocation + "dump_" + GetTimestamp() + "\\";
     // g_params.logDumpLocation = folderName + "\\";
@@ -72,13 +73,13 @@ void MyHook::start()
     if (m_threadStarted.exchange(true))
         return;
 
-    m_running = true;
+    m_running.store(true, std::memory_order_release);
     CreateThread(nullptr, 0, &MyHook::ThreadWrapperCreator, this, 0, nullptr);
 }
 
 void MyHook::stop()
 {
-    m_running.store(false);
+    m_running.store(false, std::memory_order_release);
     WaitForMultipleObjects(Threads::LAST, m_threadsHandler.data(), TRUE, 2000);
     for (HANDLE h : m_threadsHandler)
     {
@@ -653,7 +654,6 @@ void print(std::span<const uint8_t> bytes, std::stringstream &out)
 DWORD WINAPI MyHook::MsgConsumerThread()
 {
     using namespace Interface;
-    SharedBuffer<BUFFER_CAPACITY> buffer(BUFFER_NAME_TX, false); // create = false
     std::vector<uint8_t> buff;
     buff.resize(4);
 
@@ -661,10 +661,10 @@ DWORD WINAPI MyHook::MsgConsumerThread()
     {
         uint32_t len = 0;
         std::stringstream ss;
-        if (!buffer.consume_block(std::span<uint8_t>(reinterpret_cast<uint8_t *>(&len), sizeof(len))))
+        if (!m_reciver.consume_block(std::span<uint8_t>(reinterpret_cast<uint8_t *>(&len), sizeof(len))))
             break;
         buff.resize(len);
-        if (!buffer.consume_block(std::span<uint8_t>(buff.data(), len)))
+        if (!m_reciver.consume_block(std::span<uint8_t>(buff.data(), len)))
             break;        
         HandleMessage(GetCommandEnvelope(buff.data()));
     }
