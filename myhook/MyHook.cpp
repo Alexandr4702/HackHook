@@ -120,7 +120,9 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
         break;
     case CommandID_READ:
         m_log << "[MyHook] Received read command with offset: " << msg->body_as_ReadCommand()->offset() << "\n";
-
+        break;
+    case CommandID_DUMP:
+        m_log << "[MyHook] Received CommandID_DUMP command \n";
         break;
     default:
         break;

@@ -44,6 +44,11 @@ table Ack
   status: bool;
 }
 
+table EmptyCommand
+{
+  
+}
+
 union Command {
   WriteCommand,
   ReadCommand,

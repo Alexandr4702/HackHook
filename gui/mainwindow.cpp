@@ -141,15 +141,5 @@ void MainWindow::on_dumpButton_clicked()
     qDebug() << "Dump button clicked";
     using namespace Interface;
 
-    flatbuffers::FlatBufferBuilder builder;
-    uint64_t offset = 1024;
-    std::vector<uint8_t> payload = {1, 2, 3, 4, 5};
-    auto data_vec = builder.CreateVector(payload);
-
-    auto write_cmd = CreateWriteCommand(builder, offset, data_vec);
-    auto envelope = CreateCommandEnvelope(builder, CommandID_WRITE, Command::Command_WriteCommand, write_cmd.Union());
-    builder.Finish(envelope);
-
-    m_sender.send(
-        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(builder.GetBufferPointer()), builder.GetSize()));
+    m_sender.send_command(Interface::CommandID::CommandID_DUMP, Interface::Command::Command_NONE, CreateEmptyCommand);
 }

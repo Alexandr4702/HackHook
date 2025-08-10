@@ -7,7 +7,6 @@
 #include <string>
 #include <windows.h>
 
-
 #include "shared_buffer.hpp"
 
 class Logger
@@ -79,6 +78,30 @@ class MessageIPCSender
     MessageIPCSender(const std::string &shm_name, bool create);
     ~MessageIPCSender();
     void send(std::span<const uint8_t> bytes);
+
+    template <typename TCreateFn, typename... Args>
+    bool send_command(Interface::CommandID id, Interface::Command type, TCreateFn create_fn, Args &&...args)
+    {
+        std::scoped_lock lck(m_mutex);
+
+        flatbuffers::FlatBufferBuilder builder;
+
+        auto body = create_fn(builder, std::forward<Args>(args)...);
+
+        auto envelope = Interface::CreateCommandEnvelope(builder, id, type, body.Union());
+        builder.Finish(envelope);
+
+        auto buf_ptr = builder.GetBufferPointer();
+
+        const uint32_t len = builder.GetSize();
+
+        m_buffer.resize(len + sizeof(len));
+        std::memcpy(m_buffer.data(), &len, sizeof(len));
+        std::memcpy(m_buffer.data() + sizeof(uint32_t), buf_ptr, len);
+
+        return SharedBufferTx.produce_block(m_buffer);
+    }
+
     void close();
     void reset();
 

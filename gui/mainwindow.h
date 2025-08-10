@@ -1,11 +1,12 @@
 #pragma once
 
 #include "WindowSelectorCombo.h"
-#include "common/utility.h"
 #include "common/common.h"
+#include "common/utility.h"
 #include "injector/Injector.h"
 #include <QMainWindow>
 #include <thread>
+
 
 QT_BEGIN_NAMESPACE
 namespace Ui
