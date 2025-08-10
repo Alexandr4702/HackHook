@@ -68,7 +68,8 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
     switch (msg->id())
     {
     case CommandID_WRITE:
-        qDebug() << "[HandleMessage] Received write command with offset: " << msg->body_as_WriteCommand()->offset() << "\n";
+        qDebug() << "[HandleMessage] Received write command with offset: " << msg->body_as_WriteCommand()->offset()
+                 << "\n";
 
         break;
     case CommandID_ACK:
@@ -140,20 +141,14 @@ void MainWindow::on_dumpButton_clicked()
     qDebug() << "Dump button clicked";
     using namespace Interface;
 
-
     flatbuffers::FlatBufferBuilder builder;
     uint64_t offset = 1024;
     std::vector<uint8_t> payload = {1, 2, 3, 4, 5};
     auto data_vec = builder.CreateVector(payload);
 
     auto write_cmd = CreateWriteCommand(builder, offset, data_vec);
-    auto envelope = CreateCommandEnvelope(
-        builder,
-        CommandID_WRITE,
-        Command::Command_WriteCommand,
-        write_cmd.Union());
+    auto envelope = CreateCommandEnvelope(builder, CommandID_WRITE, Command::Command_WriteCommand, write_cmd.Union());
     builder.Finish(envelope);
-
 
     m_sender.send(
         std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(builder.GetBufferPointer()), builder.GetSize()));

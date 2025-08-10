@@ -26,12 +26,9 @@ typedef struct _THREAD_BASIC_INFORMATION
     LONG BasePriority;
 } THREAD_BASIC_INFORMATION;
 
-typedef NTSTATUS(NTAPI *pNtQueryInformationThread)(
-    HANDLE ThreadHandle,
-    THREADINFOCLASS ThreadInformationClass,
-    PVOID ThreadInformation,
-    ULONG ThreadInformationLength,
-    PULONG ReturnLength);
+typedef NTSTATUS(NTAPI *pNtQueryInformationThread)(HANDLE ThreadHandle, THREADINFOCLASS ThreadInformationClass,
+                                                   PVOID ThreadInformation, ULONG ThreadInformationLength,
+                                                   PULONG ReturnLength);
 
 struct SectionRange
 {
@@ -60,7 +57,7 @@ struct SectionInfo
     std::string sectionName;
 };
 
-MyHook::MyHook(): m_reciver(BUFFER_NAME_TX, false), m_sender(BUFFER_NAME_RX, false)
+MyHook::MyHook() : m_reciver(BUFFER_NAME_TX, false), m_sender(BUFFER_NAME_RX, false)
 {
     // std::string folderName = g_params.logDumpLocation + "dump_" + GetTimestamp() + "\\";
     // g_params.logDumpLocation = folderName + "\\";
@@ -109,12 +106,12 @@ DWORD WINAPI MyHook::ThreadWrapperMsg(LPVOID param)
     return static_cast<MyHook *>(param)->MsgConsumerThread();
 }
 
-void MyHook::HandleMessage(const Interface::CommandEnvelope * msg)
+void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
 {
     using namespace Interface;
-    if(msg == nullptr)
+    if (msg == nullptr)
         return;
-    
+
     switch (msg->id())
     {
     case CommandID_WRITE:
@@ -166,8 +163,7 @@ std::vector<THREAD_BASIC_INFORMATION> GetAllThreadInfo(DWORD processId)
         return threadInfos;
     }
 
-    auto NtQueryInformationThread = (pNtQueryInformationThread)
-        GetProcAddress(hNtdll, "NtQueryInformationThread");
+    auto NtQueryInformationThread = (pNtQueryInformationThread)GetProcAddress(hNtdll, "NtQueryInformationThread");
 
     if (!NtQueryInformationThread)
     {
@@ -183,8 +179,7 @@ std::vector<THREAD_BASIC_INFORMATION> GetAllThreadInfo(DWORD processId)
             if (hThread)
             {
                 THREAD_BASIC_INFORMATION tbi;
-                NTSTATUS status = NtQueryInformationThread(
-                    hThread, ThreadBasicInformation, &tbi, sizeof(tbi), nullptr);
+                NTSTATUS status = NtQueryInformationThread(hThread, ThreadBasicInformation, &tbi, sizeof(tbi), nullptr);
                 if (status == 0) // STATUS_SUCCESS
                     threadInfos.push_back(tbi);
 
@@ -309,7 +304,8 @@ std::vector<SectionInfo> dumpWithMapping(const std::string &filePath, HANDLE hPr
             {
                 DWORD dwError = GetLastError();
                 std::stringstream ss;
-                ss << "Readed != size: " << dwError << " " << result << " " << bytesRead << " " << mbi.RegionSize << "\n";
+                ss << "Readed != size: " << dwError << " " << result << " " << bytesRead << " " << mbi.RegionSize
+                   << "\n";
                 // g_log << ss.str();
                 switch (dwError)
                 {
@@ -335,7 +331,8 @@ std::vector<SectionInfo> dumpWithMapping(const std::string &filePath, HANDLE hPr
         }
 
         currentAddress = reinterpret_cast<uint8_t *>(currentAddress) + mbi.RegionSize;
-        sections.emplace_back(SectionInfo(mbi.BaseAddress, mbi.RegionSize, currentDumpOffset, dumpSize, mbi.State, mbi.Protect, mbi.Type, moduleName, sectionName));
+        sections.emplace_back(SectionInfo(mbi.BaseAddress, mbi.RegionSize, currentDumpOffset, dumpSize, mbi.State,
+                                          mbi.Protect, mbi.Type, moduleName, sectionName));
         currentDumpOffset += dumpSize;
     }
 
@@ -434,15 +431,10 @@ void DumpMemoryMapToCSV(const std::string &outputCsv, const std::vector<SectionI
         }
 
         std::stringstream ss;
-        ss << "0x" << std::hex
-           << reinterpret_cast<uintptr_t>(section.baseAddress) << ","
-           << std::dec << section.regionSize << ","
-           << "0x" << std::hex
-           << section.dumpOffset << ","
-           << std::dec << section.dumpSize << ","
-           << state << ","
-           << protect << ","
-           << type << ","
+        ss << "0x" << std::hex << reinterpret_cast<uintptr_t>(section.baseAddress) << "," << std::dec
+           << section.regionSize << ","
+           << "0x" << std::hex << section.dumpOffset << "," << std::dec << section.dumpSize << "," << state << ","
+           << protect << "," << type << ","
            << "\"" << section.moduleName << "\","
            << "\"" << section.sectionName << "\"\n";
 
@@ -454,9 +446,10 @@ void DumpMemoryMapToCSV(const std::string &outputCsv, const std::vector<SectionI
 
 class HeapAnalyzer
 {
-public:
-    explicit HeapAnalyzer(std::ostream &output)
-        : out(output) {}
+  public:
+    explicit HeapAnalyzer(std::ostream &output) : out(output)
+    {
+    }
 
     bool Analyze(bool csvFormat = false)
     {
@@ -501,7 +494,7 @@ public:
         return true;
     }
 
-private:
+  private:
     std::ostream &out;
 
     bool DumpHeapInfo(HANDLE heap, size_t heapId, bool csvFormat)
@@ -513,15 +506,11 @@ private:
             if (csvFormat)
             {
                 // CSV: HeapID;BlockAddress;Size;Type;RegionStart;CommittedSize;UncommittedSize
-                out << heapId << ";"
-                    << entry.lpData << ";"
-                    << entry.cbData << ";";
+                out << heapId << ";" << entry.lpData << ";" << entry.cbData << ";";
 
                 if (entry.wFlags & PROCESS_HEAP_REGION)
                 {
-                    out << "REGION;"
-                        << entry.Region.lpFirstBlock << ";"
-                        << entry.Region.dwCommittedSize << ";"
+                    out << "REGION;" << entry.Region.lpFirstBlock << ";" << entry.Region.dwCommittedSize << ";"
                         << entry.Region.dwUnCommittedSize << "\n";
                 }
                 else if (entry.wFlags & PROCESS_HEAP_UNCOMMITTED_RANGE)
@@ -539,8 +528,7 @@ private:
             }
             else
             {
-                out << "  Block at " << entry.lpData
-                    << ", size: " << entry.cbData << " bytes";
+                out << "  Block at " << entry.lpData << ", size: " << entry.cbData << " bytes";
 
                 if (entry.wFlags & PROCESS_HEAP_REGION)
                 {
@@ -591,7 +579,9 @@ void SendKeyToWindow(HWND hWnd, char key)
 //     outFile << "ExitStatus,TebBaseAddress,UniqueProcess,UniqueThread,AffinityMask,Priority,BasePriority\n";
 //     for (auto threadInfo : threadInfos)
 //     {
-//         outFile << threadInfo.ExitStatus << "," << threadInfo.TebBaseAddress << "," << threadInfo.ClientId.UniqueProcess << "," << threadInfo.ClientId.UniqueThread << "," << threadInfo.AffinityMask << "," << threadInfo.Priority << "," << threadInfo.BasePriority << "\n";
+//         outFile << threadInfo.ExitStatus << "," << threadInfo.TebBaseAddress << "," <<
+//         threadInfo.ClientId.UniqueProcess << "," << threadInfo.ClientId.UniqueThread << "," <<
+//         threadInfo.AffinityMask << "," << threadInfo.Priority << "," << threadInfo.BasePriority << "\n";
 //     }
 //     m_log << "MemReadThread started \n";
 //     auto sections = dumpWithMapping(g_params.logDumpLocation + "mem_dump.bin", GetCurrentProcess());
@@ -665,16 +655,14 @@ DWORD WINAPI MyHook::MsgConsumerThread()
             break;
         buff.resize(len);
         if (!m_reciver.consume_block(std::span<uint8_t>(buff.data(), len)))
-            break;        
+            break;
         HandleMessage(GetCommandEnvelope(buff.data()));
     }
 
     return 0;
 }
 
-extern "C" __declspec(dllexport)
-LRESULT CALLBACK
-HookProc(int code, WPARAM wParam, LPARAM lParam)
+extern "C" __declspec(dllexport) LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
 {
     if (code >= 0)
     {
