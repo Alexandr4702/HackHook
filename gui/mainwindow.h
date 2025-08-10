@@ -37,6 +37,6 @@ class MainWindow : public QMainWindow
     Injector m_injector;
     MessageIPCSender m_sender;
     SharedBuffer<BUFFER_CAPACITY> m_reciver;
-    std::thread m_recive_thread;
+    std::jthread m_recive_thread;
     std::atomic<bool> m_running = true;
 };

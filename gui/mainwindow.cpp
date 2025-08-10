@@ -9,7 +9,7 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
     ui->dumpButton->setEnabled(false);
-    m_recive_thread = std::thread(&MainWindow::MsgConsumerThread, this);
+    m_recive_thread = std::jthread(&MainWindow::MsgConsumerThread, this);
     connect(ui->windowSelectorCombo, &WindowSelectorCombo::aboutToShowPopup, this, &MainWindow::onWindowSelectorOpened);
 }
 
@@ -17,7 +17,6 @@ MainWindow::~MainWindow()
 {
     m_running.store(false, std::memory_order_release);
     m_reciver.close();
-    m_recive_thread.join();
     delete ui;
 }
 
