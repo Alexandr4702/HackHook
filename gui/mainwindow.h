@@ -5,6 +5,7 @@
 #include "common/utility.h"
 #include "injector/Injector.h"
 #include <QMainWindow>
+#include <condition_variable>
 #include <thread>
 
 
@@ -39,4 +40,8 @@ class MainWindow : public QMainWindow
     SharedBuffer<BUFFER_CAPACITY> m_reciver;
     std::jthread m_recive_thread;
     std::atomic<bool> m_running = true;
+
+    bool m_hooked = false;
+    std::mutex m_hook_mutex;
+    std::condition_variable m_hook_cv;
 };

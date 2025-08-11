@@ -17,6 +17,7 @@ MainWindow::~MainWindow()
 {
     m_running.store(false, std::memory_order_release);
     m_reciver.close();
+    m_hook_cv.notify_all();
     delete ui;
 }
 
@@ -45,14 +46,28 @@ void MainWindow::MsgConsumerThread()
 
     while (m_running.load(std::memory_order_acquire))
     {
-        uint32_t len = 0;
-        if (!m_reciver.consume_block(std::span<uint8_t>(reinterpret_cast<uint8_t *>(&len), sizeof(len))))
+        {
+            std::unique_lock lck(m_hook_mutex);
+            m_hook_cv.wait(lck, [this]() { return m_hooked || !m_running.load(std::memory_order_acquire); });
+        }
+
+        if (!m_running.load(std::memory_order_acquire)) 
         {
             break;
         }
+
+        uint32_t len = 0;
+        if (!m_reciver.consume_block(std::span<uint8_t>(reinterpret_cast<uint8_t *>(&len), sizeof(len))))
+        {
+            qDebug() << "Failed to consume len";
+            continue;
+        }
         buff.resize(len);
         if (!m_reciver.consume_block(std::span<uint8_t>(buff.data(), len)))
-            break;
+        {
+            qDebug() << "Failed to consume data";
+            continue;
+        }
         HandleMessage(GetCommandEnvelope(buff.data()));
     }
 
@@ -109,6 +124,7 @@ void MainWindow::onWindowSelectorOpened()
 
 void MainWindow::on_hookButton_clicked()
 {
+    std::scoped_lock lck(m_hook_mutex);
     if (!m_injector.isHooked())
     {
         std::wstring windowName = ui->windowSelectorCombo->currentText().toStdWString();
@@ -122,6 +138,9 @@ void MainWindow::on_hookButton_clicked()
             qDebug() << "HookInjected " << windowName;
             ui->hookButton->setText("Unhook");
             m_sender.reset();
+            m_reciver.reset();
+            m_hooked = true;
+            m_hook_cv.notify_all();
             ui->dumpButton->setEnabled(true);
         } 
         else {
@@ -133,6 +152,7 @@ void MainWindow::on_hookButton_clicked()
         m_injector.unhook();
         m_sender.close();
         m_reciver.reset();
+        m_hooked = false;
         ui->dumpButton->setEnabled(false);
         qDebug() << "unooked";
         ui->hookButton->setText("Inject Hook");
