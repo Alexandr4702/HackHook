@@ -123,6 +123,7 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
         break;
     case CommandID_DUMP:
         m_log << "[MyHook] Received CommandID_DUMP command \n";
+        m_sender.send_command(Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE, CreateEmptyCommand);
         break;
     default:
         break;

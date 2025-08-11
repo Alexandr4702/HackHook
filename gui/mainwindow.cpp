@@ -46,9 +46,10 @@ void MainWindow::MsgConsumerThread()
     while (m_running.load(std::memory_order_acquire))
     {
         uint32_t len = 0;
-        std::stringstream ss;
         if (!m_reciver.consume_block(std::span<uint8_t>(reinterpret_cast<uint8_t *>(&len), sizeof(len))))
+        {
             break;
+        }
         buff.resize(len);
         if (!m_reciver.consume_block(std::span<uint8_t>(buff.data(), len)))
             break;
@@ -67,13 +68,10 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
     switch (msg->id())
     {
     case CommandID_WRITE:
-        qDebug() << "[HandleMessage] Received write command with offset: " << msg->body_as_WriteCommand()->offset()
-                 << "\n";
-
+        qDebug() << "[HandleMessage] Received write command with offset: " << msg->body_as_WriteCommand()->offset();
         break;
     case CommandID_ACK:
-        qDebug() << "[HandleMessage] Received CommandID_ACK command" << msg->body_as_ReadCommand()->offset() << "\n";
-
+        qDebug() << "[HandleMessage] Received CommandID_ACK command";
         break;
     default:
         break;
@@ -114,14 +112,20 @@ void MainWindow::on_hookButton_clicked()
     if (!m_injector.isHooked())
     {
         std::wstring windowName = ui->windowSelectorCombo->currentText().toStdWString();
-        qDebug() << "hookInjected " << windowName;
         if (windowName.empty())
+        {
+            qDebug() << "Window name is empty " << windowName;
             return;
+        }
         if (m_injector.hook(windowName))
         {
+            qDebug() << "HookInjected " << windowName;
             ui->hookButton->setText("Unhook");
             m_sender.reset();
             ui->dumpButton->setEnabled(true);
+        } 
+        else {
+            qDebug() << "Hook is not injected " << windowName;
         }
     }
     else
