@@ -15,6 +15,7 @@ add_library(injector STATIC injector/injector.cpp)
 add_library(myhook SHARED 
 myhook/MyHook.cpp 
 myhook/IpcHandler.cpp
+myhook/MemDumper.cpp
 )
 
 target_link_libraries(injector PRIVATE common)
