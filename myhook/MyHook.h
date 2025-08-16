@@ -25,6 +25,7 @@ class MyHook
 
     struct HookParams
     {
+      // TODO get logDumpLocation from injector
         std::string logDumpLocation = "C:\\Users\\Alex\\Documents\\";
     } g_params;
     Logger m_log;
