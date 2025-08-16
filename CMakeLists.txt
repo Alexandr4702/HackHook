@@ -37,6 +37,7 @@ add_custom_target(generate_flatbuffers_code ALL
 
 add_dependencies(injector generate_flatbuffers_code myhook)
 add_dependencies(myhook generate_flatbuffers_code)
+add_dependencies(common generate_flatbuffers_code)
 
 set_target_properties(myhook PROPERTIES PREFIX "")
 target_compile_definitions(myhook PRIVATE -DWIN32_LEAN_AND_MEAN)
