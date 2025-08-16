@@ -17,3 +17,5 @@ add_executable(gui_app
 target_link_libraries(gui_app
     PRIVATE Qt6::Widgets injector common
 )
+
+add_dependencies(gui_app generate_flatbuffers_code)
