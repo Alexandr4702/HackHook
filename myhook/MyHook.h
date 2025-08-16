@@ -25,14 +25,7 @@ class MyHook
 
     struct HookParams
     {
-        // std::wstring targetWindow = L"Lineage2M l Katzman";
-        const std::wstring targetWindow = WINDOW_TITLE;
         std::string logDumpLocation = "C:\\Users\\Alex\\Documents\\";
-        char hotkey = 'R';
-        // char         hotkey = VK_F5;
-        bool dumpMemory = false;
-        int dumpInterval = 30;
-        int keyInterval = 1000;
     } g_params;
     Logger m_log;
 
