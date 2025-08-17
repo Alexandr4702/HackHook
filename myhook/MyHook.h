@@ -4,6 +4,8 @@
 #include "common/common.h"
 #include "common/utility.h"
 #include <atomic>
+#include <vector>
+#include <thread>
 
 class MyHook
 {
@@ -30,14 +32,7 @@ class MyHook
     } g_params;
     Logger m_log;
 
-    enum Threads
-    {
-        THREAD_CREATOR,
-        MSG_CONSUMER,
-        LAST
-    };
-
-    std::array<HANDLE, Threads::LAST> m_threadsHandler = {};
+    std::vector<std::jthread> m_threadsHandler;
     std::atomic<bool> m_running = true;
     std::atomic<bool> m_threadStarted = false;
     HWND m_targetHwnd = nullptr;

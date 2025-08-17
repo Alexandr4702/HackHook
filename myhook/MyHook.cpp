@@ -37,12 +37,6 @@ void MyHook::start()
 void MyHook::stop()
 {
     m_running.store(false, std::memory_order_release);
-    WaitForMultipleObjects(Threads::LAST, m_threadsHandler.data(), TRUE, 2000);
-    for (HANDLE h : m_threadsHandler)
-    {
-        if (h)
-            CloseHandle(h);
-    }
     m_log << "[MyHook] Stopped\n";
 }
 
@@ -102,7 +96,8 @@ DWORD MyHook::ThreadsCreator()
     CreateDirectory(folderName.c_str(), nullptr);
     m_log.init(g_params.logDumpLocation + "log.txt");
 
-    m_threadsHandler[Threads::MSG_CONSUMER] = CreateThread(nullptr, 0, &MyHook::ThreadWrapperMsg, this, 0, nullptr);
+    m_threadsHandler.emplace_back(
+        std::jthread(&MyHook::ThreadWrapperMsg, this));
 
     return 0;
 }
