@@ -11,5 +11,5 @@ target_link_libraries(myhook PRIVATE common)
 
 add_dependencies(myhook generate_flatbuffers_code)
 
-set_target_properties(myhook PROPERTIES PREFIX "")
+set_target_properties(myhook PROPERTIES PREFIX "" RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/..")
 target_compile_definitions(myhook PRIVATE -DWIN32_LEAN_AND_MEAN)
