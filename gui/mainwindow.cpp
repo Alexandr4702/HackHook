@@ -4,11 +4,39 @@
 #include <thread>
 #include <windows.h>
 
+namespace
+{
+    enum ValueType {
+        Int32,
+        Float,
+        Double,
+        Int64,
+        String,
+        String16,
+        ByteArray,
+        LAST
+    };
+
+    constexpr std::array<std::pair<const char*, ValueType>, ValueType::LAST> valueTypes {{
+        {"Int32",     ValueType::Int32},
+        {"Float",     ValueType::Float},
+        {"Double",    ValueType::Double},
+        {"Int64",     ValueType::Int64},
+        {"String",    ValueType::String},
+        {"String16",  ValueType::String16},
+        {"ByteArray", ValueType::ByteArray}
+    }};
+}
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow), m_sender(BUFFER_NAME_TX, true), m_reciver(BUFFER_NAME_RX, true)
 {
     ui->setupUi(this);
     ui->dumpButton->setEnabled(false);
+    for (const auto &[text, type] : valueTypes)
+    {
+        ui->valueTypeCombo->addItem(text, static_cast<int>(type));
+    }
     m_recive_thread = std::jthread(&MainWindow::MsgConsumerThread, this);
     connect(ui->windowSelectorCombo, &WindowSelectorCombo::aboutToShowPopup, this, &MainWindow::onWindowSelectorOpened);
 }
@@ -97,6 +125,11 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
     case CommandID_ACK:
         qDebug() << "[HandleMessage] Received CommandID_ACK command";
         break;
+    case CommandID_FIND_ACK:
+    {
+        qDebug() << "[HandleMessage] Received CommandID_FIND_ACK command";
+        break;
+    }
     default:
         break;
     }
@@ -174,4 +207,89 @@ void MainWindow::on_dumpButton_clicked()
     using namespace Interface;
 
     m_sender.send_command(Interface::CommandID::CommandID_DUMP, Interface::Command::Command_NONE, CreateEmptyCommand);
+}
+
+void MainWindow::on_firstScanButton_clicked()
+{
+    if (!m_injector.isHooked())
+    {
+        return;
+    }
+    // ui->valueTypeCombo->currentData().toInt();
+    std::vector<uint8_t> data;
+
+    switch (ui->valueTypeCombo->currentData().toInt())
+    {
+    case ValueType::Int32: {
+        int32_t val = ui->valueEdit->text().toInt();
+        uint8_t *p = reinterpret_cast<uint8_t *>(&val);
+        data.assign(p, p + sizeof(val));
+        break;
+    }
+    case ValueType::Float: {
+        float val = ui->valueEdit->text().toFloat();
+        uint8_t *p = reinterpret_cast<uint8_t *>(&val);
+        data.assign(p, p + sizeof(val));
+        break;
+    }
+    case ValueType::Double: {
+        double val = ui->valueEdit->text().toDouble();
+        uint8_t *p = reinterpret_cast<uint8_t *>(&val);
+        data.assign(p, p + sizeof(val));
+        break;
+    }
+    case ValueType::Int64: {
+        qint64 val = ui->valueEdit->text().toLongLong();
+        uint8_t *p = reinterpret_cast<uint8_t *>(&val);
+        data.assign(p, p + sizeof(val));
+        break;
+    }
+    case ValueType::String: {
+        QByteArray val = ui->valueEdit->text().toUtf8();
+        data.assign(val.begin(), val.end());
+        break;
+    }
+    case ValueType::String16: {
+        auto str = ui->valueEdit->text().toStdU16String();
+        uint8_t *p = reinterpret_cast<uint8_t *>(str.data());
+        data.assign(p, p + str.size() * sizeof(char16_t));
+        break;
+    }
+    case ValueType::ByteArray: {
+        std::string hex = ui->valueEdit->text().toStdString();
+
+        if (hex.size() % 2 != 0)
+        {
+            hex = "0" + hex;
+        }
+        for (size_t i = 0; i < hex.size(); i += 2)
+        {
+            uint8_t byte = static_cast<uint8_t>(std::stoul(hex.substr(i, 2), nullptr, 16));
+            data.push_back(byte);
+        }
+        break;
+    }
+    default:
+        break;
+    }
+    qDebug() << data;
+    // ui->valueEdit->text();
+
+    auto create_find_cmd = [](flatbuffers::FlatBufferBuilder &builder, const std::vector<uint8_t> &data) {
+        auto vec = builder.CreateVector(data);
+        return Interface::CreateFindCommand(builder, vec);
+    };
+
+    m_sender.send_command(Interface::CommandID::CommandID_FIND, Interface::Command::Command_FindCommand, create_find_cmd, data);
+    qDebug() << "on_firstScan_clicked " << ui->valueTypeCombo->currentData().toInt() << " " << ui->valueEdit->text();
+}
+
+void MainWindow::on_nextScanButton_clicked()
+{
+    if (!m_injector.isHooked())
+    {
+        return;
+    }
+
+    qDebug() << "on_nextScan_clicked";
 }

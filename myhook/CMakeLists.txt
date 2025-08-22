@@ -3,6 +3,7 @@ add_library(myhook SHARED
     MyHook.cpp 
     IpcHandler.cpp
     MemDumper.cpp
+    MemoryScanner.cpp
 )
 
 include_directories(.)

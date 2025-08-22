@@ -16,6 +16,7 @@
 
 #include "MyHook.h"
 #include "MemDumper.h"
+#include "MemoryScanner.h"
 
 MyHook::MyHook() : m_reciver(BUFFER_NAME_TX, false), m_sender(BUFFER_NAME_RX, false)
 {
@@ -75,15 +76,34 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
     case CommandID_READ:
         m_log << "[MyHook] Received read command with offset: " << msg->body_as_ReadCommand()->offset() << "\n";
         break;
-    case CommandID_DUMP:
-        {
+    case CommandID_DUMP: {
         m_log << "[MyHook] Received CommandID_DUMP command \n";
         std::string dump_location = g_params.logDumpLocation + "dump_" + Logger::GetTimestamp() + "\\";
         CreateDirectory(dump_location.c_str(), nullptr);
-        MemRead( dump_location, m_log );
-        m_sender.send_command(Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE, CreateEmptyCommand);
+        MemRead(dump_location, m_log);
+        m_sender.send_command(Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE,
+                              CreateEmptyCommand);
         break;
+    }
+    case CommandID_FIND: {
+        m_log << "[MyHook] Received CommandID_FIND command \n";
+
+        // std::span<const uint8_t> pattern = {msg->body_as_FindCommand()->data(), msg->body_as_FindCommand()->data()->size()};
+
+        auto data_vector = msg->body_as_FindCommand()->data();
+        std::span<const uint8_t> pattern = {data_vector->data(), data_vector->size()};
+        // std::vector<uint8_t> pattern = {1, 2, 3};
+        m_log << std::format("[MyHook] Pattern size: {} \n", pattern.size());
+        std::vector<FoundOccurrences> result = find(pattern);
+
+        for (const auto &item : result)
+        {
+            m_sender.send_command(Interface::CommandID::CommandID_FIND_ACK, Interface::Command::Command_FindAck,
+                                  CreateFindAck, item.baseAddress, item.offset, item.region_size, item.data_size,
+                                  item.type);
         }
+        break;
+    }
     default:
         break;
     }

@@ -75,36 +75,6 @@
       </item>
       <item>
        <widget class="QComboBox" name="valueTypeCombo">
-        <item>
-         <property name="text">
-          <string>Int32</string>
-         </property>
-        </item>
-        <item>
-         <property name="text">
-          <string>Float</string>
-         </property>
-        </item>
-        <item>
-         <property name="text">
-          <string>Double</string>
-         </property>
-        </item>
-        <item>
-         <property name="text">
-          <string>Int64</string>
-         </property>
-        </item>
-        <item>
-         <property name="text">
-          <string>String</string>
-         </property>
-        </item>
-        <item>
-         <property name="text">
-          <string>ByteArray</string>
-         </property>
-        </item>
        </widget>
       </item>
       <item>

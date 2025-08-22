@@ -8,7 +8,6 @@
 #include <condition_variable>
 #include <thread>
 
-
 QT_BEGIN_NAMESPACE
 namespace Ui
 {
@@ -32,6 +31,8 @@ class MainWindow : public QMainWindow
     void onWindowSelectorOpened();
     void on_hookButton_clicked();
     void on_dumpButton_clicked();
+    void on_firstScanButton_clicked();
+    void on_nextScanButton_clicked();
 
   private:
     Ui::MainWindow *ui;
