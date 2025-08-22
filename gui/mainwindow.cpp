@@ -15,9 +15,18 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    if (m_injector.isHooked())
+    {
+        m_injector.unhook();
+        m_sender.close();
+        m_reciver.reset();
+        m_hooked = false;
+    }
+
     m_running.store(false, std::memory_order_release);
     m_reciver.close();
     m_hook_cv.notify_all();
+
     delete ui;
 }
 
