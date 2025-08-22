@@ -4,6 +4,8 @@
 #include <thread>
 #include <windows.h>
 
+#include "myhook/MemoryScanner.h"
+
 namespace
 {
     enum ValueType {
@@ -127,6 +129,17 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
         break;
     case CommandID_FIND_ACK:
     {
+        FoundOccurrences found;
+        found.baseAddress = msg->body_as_FindAck()->base_address();
+        found.offset = msg->body_as_FindAck()->offset();
+        found.region_size = msg->body_as_FindAck()->region_size();
+        found.data_size = msg->body_as_FindAck()->data_size();
+        found.type = msg->body_as_FindAck()->type();
+
+        qDebug() << "[HandleMessage] Received CommandID_FIND_ACK command with baseAddress: " << reinterpret_cast<void*> (found.baseAddress)
+                 << " offset: " << found.offset << " region_size: " << found.region_size << " data_size: " << found.data_size
+                 << " type: " << found.type;
+
         qDebug() << "[HandleMessage] Received CommandID_FIND_ACK command";
         break;
     }
