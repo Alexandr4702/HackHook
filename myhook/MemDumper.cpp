@@ -122,8 +122,9 @@ std::vector<SectionInfo> dumpWithMapping(const std::string &filePath, HANDLE hPr
     std::unordered_map<LPVOID, ModuleInfo> moduleMap = BuildModuleMap(hProcess);
     std::vector<SectionInfo> sections;
     size_t currentDumpOffset = 0;
-    const size_t kDefaultBufferSize = 4 * 1024 * 1024;
-    std::vector<BYTE> buffer(kDefaultBufferSize);
+
+    // const size_t kDefaultBufferSize = 4 * 1024 * 1024;
+    // std::vector<BYTE> buffer(kDefaultBufferSize);
 
     std::ofstream outFile(filePath, std::ios::binary);
     if (!outFile.is_open())
@@ -136,7 +137,7 @@ std::vector<SectionInfo> dumpWithMapping(const std::string &filePath, HANDLE hPr
     {
         MEMORY_BASIC_INFORMATION mbi;
         size_t dumpSize = 0;
-        if (VirtualQueryEx(hProcess, currentAddress, &mbi, sizeof(mbi)) == 0)
+        if (VirtualQuery( currentAddress, &mbi, sizeof(mbi)) == 0)
             break;
 
         std::string moduleName = "";
@@ -159,39 +160,43 @@ std::vector<SectionInfo> dumpWithMapping(const std::string &filePath, HANDLE hPr
 
         if ((mbi.State == MEM_COMMIT) && mbi.Protect != PAGE_NOACCESS && !(mbi.Protect & PAGE_GUARD))
         {
-            SIZE_T bytesRead = 0;
-            dumpSize = 0;
-            buffer.reserve(mbi.RegionSize);
-            WINBOOL result = ReadProcessMemory(hProcess, mbi.BaseAddress, buffer.data(), mbi.RegionSize, &bytesRead);
+            outFile.write(reinterpret_cast<const char *>(mbi.BaseAddress), mbi.RegionSize);
 
-            if (!result || bytesRead != mbi.RegionSize)
-            {
-                DWORD dwError = GetLastError();
-                std::stringstream ss;
-                ss << "Readed != size: " << dwError << " " << result << " " << bytesRead << " " << mbi.RegionSize
-                   << "\n";
-                // g_log << ss.str();
-                switch (dwError)
-                {
-                case ERROR_ACCESS_DENIED:
-                    // g_log << "Access denied. Ensure you have appropriate permissions." << std::endl;
-                    break;
-                case ERROR_INVALID_PARAMETER:
-                    // g_log << "Invalid parameter provided. Check the address or buffer size." << std::endl;
-                    break;
-                case ERROR_PARTIAL_COPY:
-                    // g_log << "Only part of the memory was read. This may indicate a boundary issue." << std::endl;
-                    break;
-                default:
-                    // g_log << "Unknown error." << std::endl;
-                    break;
-                }
-            }
-            else
-            {
-                dumpSize = bytesRead;
-                outFile.write(reinterpret_cast<const char *>(buffer.data()), bytesRead);
-            }
+            // SIZE_T bytesRead = 0;
+            // dumpSize = 0;
+            // buffer.reserve(mbi.RegionSize);
+            // dumpSize = bytesRead;
+
+            // WINBOOL result = ReadProcessMemory(hProcess, mbi.BaseAddress, buffer.data(), mbi.RegionSize, &bytesRead);
+
+            // if (!result || bytesRead != mbi.RegionSize)
+            // {
+            //     DWORD dwError = GetLastError();
+            //     std::stringstream ss;
+            //     ss << "Readed != size: " << dwError << " " << result << " " << bytesRead << " " << mbi.RegionSize
+            //        << "\n";
+            //     // g_log << ss.str();
+            //     switch (dwError)
+            //     {
+            //     case ERROR_ACCESS_DENIED:
+            //         // g_log << "Access denied. Ensure you have appropriate permissions." << std::endl;
+            //         break;
+            //     case ERROR_INVALID_PARAMETER:
+            //         // g_log << "Invalid parameter provided. Check the address or buffer size." << std::endl;
+            //         break;
+            //     case ERROR_PARTIAL_COPY:
+            //         // g_log << "Only part of the memory was read. This may indicate a boundary issue." << std::endl;
+            //         break;
+            //     default:
+            //         // g_log << "Unknown error." << std::endl;
+            //         break;
+            //     }
+            // }
+            // else
+            // {
+            //     dumpSize = bytesRead;
+            //     outFile.write(reinterpret_cast<const char *>(buffer.data()), bytesRead);
+            // }
         }
 
         currentAddress = reinterpret_cast<uint8_t *>(currentAddress) + mbi.RegionSize;
