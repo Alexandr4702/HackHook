@@ -139,8 +139,6 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
         qDebug() << "[HandleMessage] Received CommandID_FIND_ACK command with baseAddress: " << reinterpret_cast<void*> (found.baseAddress)
                  << " offset: " << found.offset << " region_size: " << found.region_size << " data_size: " << found.data_size
                  << " type: " << found.type;
-
-        qDebug() << "[HandleMessage] Received CommandID_FIND_ACK command";
         break;
     }
     default:

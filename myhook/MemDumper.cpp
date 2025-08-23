@@ -161,7 +161,7 @@ std::vector<SectionInfo> dumpWithMapping(const std::string &filePath, HANDLE hPr
         if ((mbi.State == MEM_COMMIT) && mbi.Protect != PAGE_NOACCESS && !(mbi.Protect & PAGE_GUARD))
         {
             outFile.write(reinterpret_cast<const char *>(mbi.BaseAddress), mbi.RegionSize);
-
+            dumpSize = mbi.RegionSize;
             // SIZE_T bytesRead = 0;
             // dumpSize = 0;
             // buffer.reserve(mbi.RegionSize);
