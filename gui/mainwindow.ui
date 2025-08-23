@@ -96,18 +96,43 @@
     <item>
      <widget class="QTableWidget" name="resultsTable">
       <property name="columnCount">
-       <number>2</number>
+       <number>7</number>
       </property>
-      <column>
-       <property name="text">
-        <string>Address</string>
-       </property>
-      </column>
-      <column>
+    <column>
        <property name="text">
         <string>Value</string>
        </property>
       </column>
+    <column>
+       <property name="text">
+        <string>Base address</string>
+       </property>
+      </column>
+    <column>
+       <property name="text">
+        <string>offset</string>
+       </property>
+      </column>
+    <column>
+       <property name="text">
+        <string>region_size</string>
+       </property>
+      </column>
+    <column>
+       <property name="text">
+        <string>data_size</string>
+       </property>
+      </column>
+    <column>
+       <property name="text">
+        <string>type</string>
+       </property>
+      </column>
+    <column>
+       <property name="text">
+        <string>property</string>
+       </property>
+    </column>
      </widget>
     </item>
     <item>

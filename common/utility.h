@@ -2,9 +2,11 @@
 #define UTILITY_H
 
 #include "common/common.h"
+#include <bit>
+#include <format>
 #include <fstream>
 #include <mutex>
-#include <string>
+#include <span>
 #include <windows.h>
 
 #include "shared_buffer.hpp"
@@ -110,5 +112,7 @@ class MessageIPCSender
     std::vector<uint8_t> m_buffer;
     SharedBuffer<BUFFER_CAPACITY> SharedBufferTx;
 };
+
+std::string valueToString(const flatbuffers::Vector<uint8_t> *value, Interface::ValueType type);
 
 #endif // UTILITY_H

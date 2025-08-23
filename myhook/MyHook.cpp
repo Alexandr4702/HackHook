@@ -63,45 +63,57 @@ DWORD WINAPI MyHook::ThreadWrapperMsg(LPVOID param)
 
 void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
 {
-    using namespace Interface;
     if (msg == nullptr)
         return;
 
     switch (msg->id())
     {
-    case CommandID_WRITE:
+    case Interface::CommandID_WRITE:
         m_log << "[MyHook] Received write command with offset: " << msg->body_as_WriteCommand()->offset() << "\n";
 
         break;
-    case CommandID_READ:
+    case Interface::CommandID_READ:
         m_log << "[MyHook] Received read command with offset: " << msg->body_as_ReadCommand()->offset() << "\n";
         break;
-    case CommandID_DUMP: {
+    case Interface::CommandID_DUMP: {
         m_log << "[MyHook] Received CommandID_DUMP command \n";
         std::string dump_location = g_params.logDumpLocation + "dump_" + Logger::GetTimestamp() + "\\";
         CreateDirectory(dump_location.c_str(), nullptr);
         MemRead(dump_location, m_log);
         m_sender.send_command(Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE,
-                              CreateEmptyCommand);
+                              Interface::CreateEmptyCommand);
         break;
     }
-    case CommandID_FIND: {
+    case Interface::CommandID_FIND: {
         m_log << "[MyHook] Received CommandID_FIND command \n";
 
-        // std::span<const uint8_t> pattern = {msg->body_as_FindCommand()->data(), msg->body_as_FindCommand()->data()->size()};
-
         auto data_vector = msg->body_as_FindCommand()->data();
-        std::span<const uint8_t> pattern = {data_vector->data(), data_vector->size()};
-        // std::vector<uint8_t> pattern = {1, 2, 3};
+        auto value_type = msg->body_as_FindCommand()->value_type();
+
+        std::vector<uint8_t> pattern = {data_vector->data(), data_vector->data() + data_vector->size()};
+        
         m_log << std::format("[MyHook] Pattern size: {} \n", pattern.size());
         std::vector<FoundOccurrences> result = find(pattern);
 
-        for (const auto &item : result)
-        {
-            m_sender.send_command(Interface::CommandID::CommandID_FIND_ACK, Interface::Command::Command_FindAck,
-                                  CreateFindAck, item.baseAddress, item.offset, item.region_size, item.data_size,
-                                  item.type);
-        }
+        auto createFindAck = [](flatbuffers::FlatBufferBuilder &builder, std::vector<uint8_t> value_data,
+                                Interface::ValueType value_type,
+                                const std::vector<FoundOccurrences> &occs_vec) -> flatbuffers::Offset<Interface::FindAck> {
+            // occurrences
+            std::vector<flatbuffers::Offset<Interface::FoundOccurrences>> occs_fb;
+            for (const auto &o : occs_vec)
+            {
+                occs_fb.push_back(
+                    Interface::CreateFoundOccurrences(builder, o.baseAddress, o.offset, o.region_size, o.data_size, o.type));
+            }
+
+            auto occs_vector = builder.CreateVector(occs_fb);
+            auto value_vector = builder.CreateVector(value_data);
+
+            return CreateFindAck(builder, value_vector, value_type, occs_vector);
+        };
+
+        m_sender.send_command(Interface::CommandID::CommandID_FIND_ACK, Interface::Command::Command_FindAck, createFindAck, pattern, value_type, result);
+
         break;
     }
     default:

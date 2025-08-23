@@ -14,6 +14,17 @@ enum CommandID : byte {
   NACK,
 }
 
+enum ValueType : byte {
+    Int32,
+    Float,
+    Double,
+    Int64,
+    String,
+    String16,
+    ByteArray,
+    LAST
+}
+
 table WriteCommand {
   offset: ulong;
   data: [ubyte];
@@ -30,14 +41,29 @@ table ReadAck {
 }
 
 table FindCommand {
+  value_type: ValueType;
+  data: [ubyte];
+}
+
+table FoundOccurrences {
+  base_address: ulong;
   offset: ulong;
-  size: ulong;
+  region_size: ulong;
+  data_size: ulong;
+  type : int;
 }
 
 table FindAck {
-  offset: ulong;
-  size: ulong;
+  value: [ubyte];
+  value_type: ValueType;
+  occurrences: [FoundOccurrences];
 }
+
+// uint64_t baseAddress;
+// uint64_t offset;
+// uint64_t region_size;
+// uint64_t data_size;
+// int32_t type;
 
 table Ack
 {

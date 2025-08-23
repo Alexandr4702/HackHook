@@ -8,25 +8,15 @@
 
 namespace
 {
-    enum ValueType {
-        Int32,
-        Float,
-        Double,
-        Int64,
-        String,
-        String16,
-        ByteArray,
-        LAST
-    };
 
-    constexpr std::array<std::pair<const char*, ValueType>, ValueType::LAST> valueTypes {{
-        {"Int32",     ValueType::Int32},
-        {"Float",     ValueType::Float},
-        {"Double",    ValueType::Double},
-        {"Int64",     ValueType::Int64},
-        {"String",    ValueType::String},
-        {"String16",  ValueType::String16},
-        {"ByteArray", ValueType::ByteArray}
+    constexpr std::array<std::pair<const char*, Interface::ValueType>, Interface::ValueType_LAST> valueTypes {{
+        {"Int32",     Interface::ValueType_Int32},
+        {"Float",     Interface::ValueType_Float},
+        {"Double",    Interface::ValueType_Double},
+        {"Int64",     Interface::ValueType_Int64},
+        {"String",    Interface::ValueType_String},
+        {"String16",  Interface::ValueType_String16},
+        {"ByteArray", Interface::ValueType_ByteArray}
     }};
 }
 
@@ -115,30 +105,45 @@ void MainWindow::MsgConsumerThread()
 
 void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
 {
-    using namespace Interface;
     if (msg == nullptr)
         return;
 
     switch (msg->id())
     {
-    case CommandID_WRITE:
+    case Interface::CommandID_WRITE:
         qDebug() << "[HandleMessage] Received write command with offset: " << msg->body_as_WriteCommand()->offset();
         break;
-    case CommandID_ACK:
+    case Interface::CommandID_ACK:
         qDebug() << "[HandleMessage] Received CommandID_ACK command";
         break;
-    case CommandID_FIND_ACK:
+    case Interface::CommandID_FIND_ACK:
     {
-        FoundOccurrences found;
-        found.baseAddress = msg->body_as_FindAck()->base_address();
-        found.offset = msg->body_as_FindAck()->offset();
-        found.region_size = msg->body_as_FindAck()->region_size();
-        found.data_size = msg->body_as_FindAck()->data_size();
-        found.type = msg->body_as_FindAck()->type();
+        ui->resultsTable->clear();
+        ui->resultsTable->setRowCount(0);
+        auto occurrences = msg->body_as_FindAck()->occurrences();
+        auto value = valueToString(msg->body_as_FindAck()->value(), msg->body_as_FindAck()->value_type());
 
-        qDebug() << "[HandleMessage] Received CommandID_FIND_ACK command with baseAddress: " << reinterpret_cast<void*> (found.baseAddress)
-                 << " offset: " << found.offset << " region_size: " << found.region_size << " data_size: " << found.data_size
-                 << " type: " << found.type;
+        for (auto occurrence : *occurrences)
+        {
+            FoundOccurrences found;
+            found.baseAddress = occurrence->base_address();
+            found.offset = occurrence->offset();
+            found.region_size = occurrence->region_size();
+            found.data_size = occurrence->data_size();
+            found.type = occurrence->type();
+
+            auto table = ui->resultsTable;
+            int row = table->rowCount();
+            table->insertRow(row);
+
+            table->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(value)));
+            table->setItem(row, 1, new QTableWidgetItem(QString::number(found.baseAddress, 16))); // hex
+            table->setItem(row, 2, new QTableWidgetItem(QString::number(found.offset)));
+            table->setItem(row, 3, new QTableWidgetItem(QString::number(found.region_size)));
+            table->setItem(row, 4, new QTableWidgetItem(QString::number(found.data_size)));
+            table->setItem(row, 5, new QTableWidgetItem(QString::number(found.type)));
+            table->setItem(row, 6, new QTableWidgetItem(""));
+        }
         break;
     }
     default:
@@ -222,51 +227,54 @@ void MainWindow::on_dumpButton_clicked()
 
 void MainWindow::on_firstScanButton_clicked()
 {
+    using namespace Interface;
     if (!m_injector.isHooked())
     {
         return;
     }
     // ui->valueTypeCombo->currentData().toInt();
     std::vector<uint8_t> data;
+    auto value_type = ui->valueTypeCombo->currentData().toInt();
+    bool ok = true;
 
-    switch (ui->valueTypeCombo->currentData().toInt())
+    switch (value_type)
     {
-    case ValueType::Int32: {
-        int32_t val = ui->valueEdit->text().toInt();
+    case ValueType::ValueType_Int32: {
+        int32_t val = ui->valueEdit->text().toInt(&ok);
         uint8_t *p = reinterpret_cast<uint8_t *>(&val);
         data.assign(p, p + sizeof(val));
         break;
     }
-    case ValueType::Float: {
-        float val = ui->valueEdit->text().toFloat();
+    case ValueType::ValueType_Float: {
+        float val = ui->valueEdit->text().toFloat(&ok);
         uint8_t *p = reinterpret_cast<uint8_t *>(&val);
         data.assign(p, p + sizeof(val));
         break;
     }
-    case ValueType::Double: {
-        double val = ui->valueEdit->text().toDouble();
+    case ValueType::ValueType_Double: {
+        double val = ui->valueEdit->text().toDouble(&ok);
         uint8_t *p = reinterpret_cast<uint8_t *>(&val);
         data.assign(p, p + sizeof(val));
         break;
     }
-    case ValueType::Int64: {
-        qint64 val = ui->valueEdit->text().toLongLong();
+    case ValueType::ValueType_Int64: {
+        qint64 val = ui->valueEdit->text().toLongLong(&ok);
         uint8_t *p = reinterpret_cast<uint8_t *>(&val);
         data.assign(p, p + sizeof(val));
         break;
     }
-    case ValueType::String: {
+    case ValueType::ValueType_String: {
         QByteArray val = ui->valueEdit->text().toUtf8();
         data.assign(val.begin(), val.end());
         break;
     }
-    case ValueType::String16: {
+    case ValueType::ValueType_String16: {
         auto str = ui->valueEdit->text().toStdU16String();
         uint8_t *p = reinterpret_cast<uint8_t *>(str.data());
         data.assign(p, p + str.size() * sizeof(char16_t));
         break;
     }
-    case ValueType::ByteArray: {
+    case ValueType::ValueType_ByteArray: {
         std::string hex = ui->valueEdit->text().toStdString();
 
         if (hex.size() % 2 != 0)
@@ -284,14 +292,24 @@ void MainWindow::on_firstScanButton_clicked()
         break;
     }
     qDebug() << data;
+    if(!ok)
+    {
+        qDebug() << "Failed to parse value";
+        return;
+    }
     // ui->valueEdit->text();
 
-    auto create_find_cmd = [](flatbuffers::FlatBufferBuilder &builder, const std::vector<uint8_t> &data) {
+    if (data.size() == 0)
+    {
+        return;
+    }
+
+    auto create_find_cmd = [](flatbuffers::FlatBufferBuilder &builder, Interface::ValueType type, const std::vector<uint8_t> &data) {
         auto vec = builder.CreateVector(data);
-        return Interface::CreateFindCommand(builder, vec);
+        return Interface::CreateFindCommand(builder, type, vec);
     };
 
-    m_sender.send_command(Interface::CommandID::CommandID_FIND, Interface::Command::Command_FindCommand, create_find_cmd, data);
+    m_sender.send_command(Interface::CommandID::CommandID_FIND, Interface::Command::Command_FindCommand, create_find_cmd, static_cast<Interface::ValueType> (value_type), data);
     qDebug() << "on_firstScan_clicked " << ui->valueTypeCombo->currentData().toInt() << " " << ui->valueEdit->text();
 }
 
