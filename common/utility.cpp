@@ -1,12 +1,12 @@
 #include "utility.h"
 
-MessageIPCSender::MessageIPCSender(const std::string &shm_name, bool create) : SharedBufferTx(shm_name, create)
+MessageIPCSender::MessageIPCSender(const std::string &shm_name, bool create) : m_sharedBufferTx(shm_name, create)
 {
 }
 
 MessageIPCSender::~MessageIPCSender()
 {
-    SharedBufferTx.close();
+    m_sharedBufferTx.close();
 }
 
 void MessageIPCSender::send(std::span<const uint8_t> bytes)
@@ -17,17 +17,17 @@ void MessageIPCSender::send(std::span<const uint8_t> bytes)
     std::memcpy(m_buffer.data(), &len, sizeof(len));
     std::copy(bytes.begin(), bytes.end(), m_buffer.begin() + sizeof(len));
 
-    SharedBufferTx.produce_block(m_buffer);
+    m_sharedBufferTx.produce_block(m_buffer);
 }
 
 void MessageIPCSender::close()
 {
-    SharedBufferTx.close();
+    m_sharedBufferTx.close();
 }
 
 void MessageIPCSender::reset()
 {
-    SharedBufferTx.reset();
+    m_sharedBufferTx.reset();
 }
 
 std::string valueToString(const flatbuffers::Vector<uint8_t>* value,

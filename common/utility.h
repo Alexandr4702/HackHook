@@ -101,7 +101,12 @@ class MessageIPCSender
         std::memcpy(m_buffer.data(), &len, sizeof(len));
         std::memcpy(m_buffer.data() + sizeof(uint32_t), buf_ptr, len);
 
-        return SharedBufferTx.produce_block(m_buffer);
+        return m_sharedBufferTx.produce_block(m_buffer);
+    }
+
+    inline void * get_sharred_buffer_pointer()
+    {
+        return m_sharedBufferTx.get_sharred_buffer_pointer();
     }
 
     void close();
@@ -110,7 +115,7 @@ class MessageIPCSender
   private:
     std::mutex m_mutex;
     std::vector<uint8_t> m_buffer;
-    SharedBuffer<BUFFER_CAPACITY> SharedBufferTx;
+    SharedBuffer<BUFFER_CAPACITY> m_sharedBufferTx;
 };
 
 std::string valueToString(const flatbuffers::Vector<uint8_t> *value, Interface::ValueType type);

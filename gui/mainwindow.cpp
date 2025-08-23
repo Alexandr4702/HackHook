@@ -118,9 +118,9 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
         break;
     case Interface::CommandID_FIND_ACK:
     {
-        ui->resultsTable->clear();
         ui->resultsTable->setRowCount(0);
         auto occurrences = msg->body_as_FindAck()->occurrences();
+        auto value_type = msg->body_as_FindAck()->value_type();
         auto value = valueToString(msg->body_as_FindAck()->value(), msg->body_as_FindAck()->value_type());
 
         for (auto occurrence : *occurrences)
@@ -137,11 +137,11 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
             table->insertRow(row);
 
             table->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(value)));
-            table->setItem(row, 1, new QTableWidgetItem(QString::number(found.baseAddress, 16))); // hex
+            table->setItem(row, 1, new QTableWidgetItem("0x" + QString::number(found.baseAddress, 16))); // hex
             table->setItem(row, 2, new QTableWidgetItem(QString::number(found.offset)));
             table->setItem(row, 3, new QTableWidgetItem(QString::number(found.region_size)));
             table->setItem(row, 4, new QTableWidgetItem(QString::number(found.data_size)));
-            table->setItem(row, 5, new QTableWidgetItem(QString::number(found.type)));
+            table->setItem(row, 5, new QTableWidgetItem(QString::fromStdString(valueTypes[value_type].first)));
             table->setItem(row, 6, new QTableWidgetItem(""));
         }
         break;

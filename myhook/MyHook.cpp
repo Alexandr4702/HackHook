@@ -93,15 +93,23 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
         std::vector<uint8_t> pattern = {data_vector->data(), data_vector->data() + data_vector->size()};
         
         m_log << std::format("[MyHook] Pattern size: {} \n", pattern.size());
-        std::vector<FoundOccurrences> result = find(pattern);
+        std::vector<FoundOccurrences> results = find(pattern);
+        uint64_t m_reciver_address = reinterpret_cast<uint64_t>(m_reciver.get_sharred_buffer_pointer());
+        uint64_t m_sender_address = reinterpret_cast<uint64_t>(m_sender.get_sharred_buffer_pointer());
 
-        auto createFindAck = [](flatbuffers::FlatBufferBuilder &builder, std::vector<uint8_t> value_data,
+        m_log << std::format("[MyHook] Found {} results \n", results.size());
+
+        auto createFindAck = [m_reciver_address, m_sender_address](flatbuffers::FlatBufferBuilder &builder, std::vector<uint8_t> value_data,
                                 Interface::ValueType value_type,
                                 const std::vector<FoundOccurrences> &occs_vec) -> flatbuffers::Offset<Interface::FindAck> {
             // occurrences
             std::vector<flatbuffers::Offset<Interface::FoundOccurrences>> occs_fb;
             for (const auto &o : occs_vec)
             {
+                if (o.baseAddress == m_reciver_address || o.baseAddress == m_sender_address)
+                {
+                    continue;
+                }
                 occs_fb.push_back(
                     Interface::CreateFoundOccurrences(builder, o.baseAddress, o.offset, o.region_size, o.data_size, o.type));
             }
@@ -112,7 +120,7 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
             return CreateFindAck(builder, value_vector, value_type, occs_vector);
         };
 
-        m_sender.send_command(Interface::CommandID::CommandID_FIND_ACK, Interface::Command::Command_FindAck, createFindAck, pattern, value_type, result);
+        m_sender.send_command(Interface::CommandID::CommandID_FIND_ACK, Interface::Command::Command_FindAck, createFindAck, pattern, value_type, results);
 
         break;
     }

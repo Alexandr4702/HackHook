@@ -27,6 +27,7 @@ template <std::size_t Capacity> struct SharedBuffer
             m_shm = bip::managed_shared_memory(bip::open_only, shm_name.c_str());
             m_buf = m_shm.find<Buffer>("buffer").first;
         }
+        start_segment_ptr = m_shm.get_address();
     }
 
     ~SharedBuffer()
@@ -122,6 +123,11 @@ template <std::size_t Capacity> struct SharedBuffer
         m_buf->count = 0;
     }
 
+    inline void* get_sharred_buffer_pointer()
+    {
+        return start_segment_ptr;
+    }
+
   private:
     struct Buffer
     {
@@ -147,6 +153,7 @@ template <std::size_t Capacity> struct SharedBuffer
     std::string m_shm_name;
     bip::managed_shared_memory m_shm;
     Buffer *m_buf;
+    void *start_segment_ptr = nullptr;
     const bool m_creator = false;
 };
 
