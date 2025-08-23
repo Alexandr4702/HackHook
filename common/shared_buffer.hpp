@@ -19,7 +19,10 @@ template <std::size_t Capacity> struct SharedBuffer
             bip::shared_memory_object::remove(shm_name.c_str());
             // Buffer size + allacator size
             const std::size_t shm_size = sizeof(Buffer) + 64 * 1024;
-            m_shm = bip::managed_shared_memory(bip::create_only, shm_name.c_str(), shm_size);
+            // Set permissions to lowest so injected app can use the memory if injector is admin.
+            bip::permissions perms;
+            perms.set_unrestricted();
+            m_shm = bip::managed_shared_memory(bip::create_only, shm_name.c_str(), shm_size, 0, perms);
             m_buf = m_shm.construct<Buffer>("buffer")();
         }
         else
