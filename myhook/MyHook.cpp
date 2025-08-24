@@ -94,8 +94,8 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
         
         m_log << std::format("[MyHook] Pattern size: {} \n", pattern.size());
         std::vector<FoundOccurrences> results = find(pattern);
-        uint64_t m_reciver_address = reinterpret_cast<uint64_t>(m_reciver.get_sharred_buffer_pointer());
-        uint64_t m_sender_address = reinterpret_cast<uint64_t>(m_sender.get_sharred_buffer_pointer());
+        uint64_t m_reciver_address = reinterpret_cast<uint64_t>(m_reciver.get_shared_buffer_pointer());
+        uint64_t m_sender_address = reinterpret_cast<uint64_t>(m_sender.get_shared_buffer_pointer());
 
         m_log << std::format("[MyHook] Found {} results \n", results.size());
 

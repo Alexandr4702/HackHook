@@ -104,9 +104,9 @@ class MessageIPCSender
         return m_sharedBufferTx.produce_block(m_buffer);
     }
 
-    inline void * get_sharred_buffer_pointer()
+    inline void * get_shared_buffer_pointer()
     {
-        return m_sharedBufferTx.get_sharred_buffer_pointer();
+        return m_sharedBufferTx.get_shared_buffer_pointer();
     }
 
     void close();

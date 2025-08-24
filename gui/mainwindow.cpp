@@ -35,17 +35,19 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    std::scoped_lock lck(m_hook_mutex);
+
+    m_running.store(false, std::memory_order_release);
+    m_hooked = false;
+    m_reciver.reset();
+    m_reciver.close();
+    m_sender.close();
+    
     if (m_injector.isHooked())
     {
         m_injector.unhook();
-        m_sender.close();
-        m_reciver.reset();
-        m_hooked = false;
+        m_hook_cv.notify_all();
     }
-
-    m_running.store(false, std::memory_order_release);
-    m_reciver.close();
-    m_hook_cv.notify_all();
 
     delete ui;
 }
@@ -207,10 +209,10 @@ void MainWindow::on_hookButton_clicked()
     }
     else
     {
-        m_injector.unhook();
         m_sender.close();
         m_reciver.reset();
         m_hooked = false;
+        m_injector.unhook();
         ui->dumpButton->setEnabled(false);
         qDebug() << "unooked";
         ui->hookButton->setText("Inject Hook");

@@ -126,7 +126,7 @@ template <std::size_t Capacity> struct SharedBuffer
         m_buf->count = 0;
     }
 
-    inline void* get_sharred_buffer_pointer()
+    inline void* get_shared_buffer_pointer()
     {
         return start_segment_ptr;
     }
