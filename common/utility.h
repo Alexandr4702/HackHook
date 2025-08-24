@@ -9,7 +9,7 @@
 #include <span>
 #include <windows.h>
 
-#include "shared_buffer.hpp"
+#include "SharedBuffer.h"
 
 class Logger
 {
@@ -115,7 +115,7 @@ class MessageIPCSender
   private:
     std::mutex m_mutex;
     std::vector<uint8_t> m_buffer;
-    SharedBuffer<BUFFER_CAPACITY> m_sharedBufferTx;
+    SharedBuffer m_sharedBufferTx;
 };
 
 std::string valueToString(const flatbuffers::Vector<uint8_t> *value, Interface::ValueType type);

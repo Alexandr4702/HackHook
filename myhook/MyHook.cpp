@@ -18,7 +18,7 @@
 #include "MemDumper.h"
 #include "MemoryScanner.h"
 
-MyHook::MyHook() : m_reciver(BUFFER_NAME_TX, false), m_sender(BUFFER_NAME_RX, false)
+MyHook::MyHook() : m_reciver(BUFFER_NAME_TX, BUFFER_CAPACITY, false), m_sender(BUFFER_NAME_RX, false)
 {
     // std::string folderName = g_params.logDumpLocation + "dump_" + GetTimestamp() + "\\";
     // g_params.logDumpLocation = folderName + "\\";

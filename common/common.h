@@ -1,7 +1,7 @@
 #ifndef COMMON_COMMON_H
 #define COMMON_COMMON_H
 #include "interface_generated.h"
-#include "shared_buffer.hpp"
+#include "SharedBuffer.h"
 #include <string>
 
 // const std::wstring WINDOW_TITLE = L"*Untitled - Notepad";

@@ -21,7 +21,7 @@ namespace
 }
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), ui(new Ui::MainWindow), m_sender(BUFFER_NAME_TX, true), m_reciver(BUFFER_NAME_RX, true)
+    : QMainWindow(parent), ui(new Ui::MainWindow), m_sender(BUFFER_NAME_TX, true), m_reciver(BUFFER_NAME_RX, BUFFER_CAPACITY, true)
 {
     ui->setupUi(this);
     ui->dumpButton->setEnabled(false);

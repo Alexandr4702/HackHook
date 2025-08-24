@@ -37,7 +37,7 @@ class MyHook
     std::atomic<bool> m_threadStarted = false;
     HWND m_targetHwnd = nullptr;
     MessageIPCSender m_sender;
-    SharedBuffer<BUFFER_CAPACITY> m_reciver;
+    SharedBuffer m_reciver;
 
     void HandleMessage(const Interface::CommandEnvelope *msg);
 

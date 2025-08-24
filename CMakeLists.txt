@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD 23)
 
 find_package(Boost CONFIG REQUIRED)
 
-add_library(common STATIC common/utility.cpp)
+add_library(common STATIC common/utility.cpp common/SharedBuffer.cpp)
 
 # Injector
 add_library(injector STATIC injector/injector.cpp)
@@ -23,7 +23,6 @@ add_subdirectory(gui)
 add_subdirectory(dataParser)
 add_subdirectory(myhook)
 
-
 add_custom_target(generate_flatbuffers_code ALL
   COMMAND flatc --cpp -o ${CMAKE_CURRENT_BINARY_DIR}/generated_flatbuffers ${CMAKE_CURRENT_SOURCE_DIR}/interface.fbs
   BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/generated_flatbuffers/interface_generated.cpp ${CMAKE_CURRENT_BINARY_DIR}/generated_flatbuffers/interface_generated.h
@@ -32,6 +31,5 @@ add_custom_target(generate_flatbuffers_code ALL
 
 add_dependencies(injector generate_flatbuffers_code myhook)
 add_dependencies(common generate_flatbuffers_code)
-
 
 set_target_properties(injector PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})

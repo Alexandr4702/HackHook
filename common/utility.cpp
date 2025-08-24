@@ -1,6 +1,6 @@
 #include "utility.h"
 
-MessageIPCSender::MessageIPCSender(const std::string &shm_name, bool create) : m_sharedBufferTx(shm_name, create)
+MessageIPCSender::MessageIPCSender(const std::string &shm_name, bool create) : m_sharedBufferTx(shm_name, BUFFER_CAPACITY, create)
 {
 }
 
