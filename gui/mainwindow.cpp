@@ -35,20 +35,23 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    std::scoped_lock lck(m_hook_mutex);
-
     m_running.store(false, std::memory_order_release);
-    m_hooked = false;
-    m_reciver.reset();
     m_reciver.close();
+    {
+        std::scoped_lock lck(m_hook_mutex);
+        m_hooked = false;
+        m_hook_cv.notify_all();
+    }
+    if (m_recive_thread.joinable())
+    {
+        m_recive_thread.join();
+    }
     m_sender.close();
     
     if (m_injector.isHooked())
     {
         m_injector.unhook();
-        m_hook_cv.notify_all();
     }
-
     delete ui;
 }
 
