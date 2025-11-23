@@ -18,6 +18,7 @@ include_directories(.)
 include_directories(flatbuffers/include)
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/generated_flatbuffers)
 
+enable_testing()
 add_subdirectory(flatbuffers)
 add_subdirectory(gui)
 add_subdirectory(dataParser)
