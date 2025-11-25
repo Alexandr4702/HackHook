@@ -48,16 +48,6 @@ DWORD WINAPI MyHook::ThreadWrapperCreator(LPVOID param)
     return static_cast<MyHook *>(param)->ThreadsCreator();
 }
 
-// DWORD WINAPI MyHook::ThreadWrapperKey(LPVOID param)
-// {
-//     return static_cast<MyHook *>(param)->KeyPressThread();
-// }
-
-// DWORD WINAPI MyHook::ThreadWrapperMem(LPVOID param)
-// {
-//     return static_cast<MyHook *>(param)->MemReadThread();
-// }
-
 DWORD WINAPI MyHook::ThreadWrapperMsg(LPVOID param)
 {
     return static_cast<MyHook *>(param)->MsgConsumerThread();
@@ -71,11 +61,11 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
     switch (msg->id())
     {
     case Interface::CommandID_WRITE:
-        m_log << "[MyHook] Received write command with offset: " << msg->body_as_WriteCommand()->offset() << "\n";
+        m_log << std::format("[MyHook] Received write command with offset: {}\n", msg->body_as_WriteCommand()->offset());
 
         break;
     case Interface::CommandID_READ:
-        m_log << "[MyHook] Received read command with offset: " << msg->body_as_ReadCommand()->offset() << "\n";
+        m_log << std::format("[MyHook] Received read command with offset: {}\n", msg->body_as_ReadCommand()->offset());
         break;
     case Interface::CommandID_DUMP: {
         m_log << "[MyHook] Received CommandID_DUMP command \n";
@@ -131,20 +121,6 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
     }
 }
 
-LONG WINAPI VehHandler(PEXCEPTION_POINTERS exc)
-{
-    if (exc->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
-        MyHook::getInstance().m_log << std::format(
-            "[VEH] Access violation at address: {:#x}\n",
-            reinterpret_cast<uintptr_t>(exc->ExceptionRecord->ExceptionAddress)
-        );
-
-        return EXCEPTION_CONTINUE_EXECUTION;
-    }
-
-    return EXCEPTION_CONTINUE_SEARCH;
-}
-
 DWORD MyHook::ThreadsCreator()
 {
     std::string folderName = g_params.logDumpLocation + "dump_" + Logger::GetTimestamp() + "\\";
@@ -154,8 +130,6 @@ DWORD MyHook::ThreadsCreator()
 
     m_threadsHandler.emplace_back(
         std::jthread(&MyHook::ThreadWrapperMsg, this));
-
-    AddVectoredExceptionHandler(1, VehHandler);
 
     return 0;
 }
