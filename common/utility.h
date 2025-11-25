@@ -77,13 +77,16 @@ class Logger
 class MessageIPCSender
 {
   public:
-    MessageIPCSender(const std::string &shm_name, bool create);
+    MessageIPCSender() = default;
     ~MessageIPCSender();
-    void send(std::span<const uint8_t> bytes);
+    void init(const std::string &shm_name, bool create);
+    bool send(std::span<const uint8_t> bytes);
 
     template <typename TCreateFn, typename... Args>
     bool send_command(Interface::CommandID id, Interface::Command type, TCreateFn create_fn, Args &&...args)
     {
+        if (!m_sharedBufferTx.is_initialized()) return false;
+
         std::scoped_lock lck(m_mutex);
 
         flatbuffers::FlatBufferBuilder builder;

@@ -9,14 +9,17 @@
 
 namespace bip = boost::interprocess;
 
-namespace bip = boost::interprocess;
-
 class SharedBuffer
 {
 public:
-    SharedBuffer(const std::string &shm_name, std::size_t capacity, bool create);
+    SharedBuffer() = default; 
     ~SharedBuffer();
 
+    bool is_initialized() const
+    {
+        return m_buf != nullptr;
+    }
+    void init(const std::string &shm_name, std::size_t capacity, bool create);
     bool produce_block(std::span<const uint8_t> src);
     bool consume_block(std::span<uint8_t> dest);
 
@@ -47,7 +50,7 @@ private:
     bip::managed_shared_memory m_shm;
     Buffer* m_buf = nullptr;
     void* start_segment_ptr = nullptr;
-    const bool m_creator;
+    bool m_creator;
 };
 
 #endif

@@ -1,7 +1,8 @@
 #include "utility.h"
 
-MessageIPCSender::MessageIPCSender(const std::string &shm_name, bool create) : m_sharedBufferTx(shm_name, BUFFER_CAPACITY, create)
+void MessageIPCSender::init(const std::string &shm_name, bool create)
 {
+    m_sharedBufferTx.init(shm_name, BUFFER_CAPACITY, create);
 }
 
 MessageIPCSender::~MessageIPCSender()
@@ -9,15 +10,16 @@ MessageIPCSender::~MessageIPCSender()
     m_sharedBufferTx.close();
 }
 
-void MessageIPCSender::send(std::span<const uint8_t> bytes)
+bool MessageIPCSender::send(std::span<const uint8_t> bytes)
 {
+    if (!m_sharedBufferTx.is_initialized()) return false;
     std::scoped_lock lck(m_mutex);
     uint32_t len = bytes.size();
     m_buffer.resize(len + sizeof(len));
     std::memcpy(m_buffer.data(), &len, sizeof(len));
     std::copy(bytes.begin(), bytes.end(), m_buffer.begin() + sizeof(len));
 
-    m_sharedBufferTx.produce_block(m_buffer);
+    return m_sharedBufferTx.produce_block(m_buffer);
 }
 
 void MessageIPCSender::close()

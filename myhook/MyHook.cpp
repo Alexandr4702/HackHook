@@ -18,7 +18,7 @@
 #include "MemDumper.h"
 #include "MemoryScanner.h"
 
-MyHook::MyHook() : m_reciver(BUFFER_NAME_TX, BUFFER_CAPACITY, false), m_sender(BUFFER_NAME_RX, false)
+MyHook::MyHook()
 {
     // std::string folderName = g_params.logDumpLocation + "dump_" + GetTimestamp() + "\\";
     // g_params.logDumpLocation = folderName + "\\";
@@ -31,6 +31,8 @@ void MyHook::start()
     if (m_threadStarted.exchange(true))
         return;
 
+    m_reciver.init(BUFFER_NAME_TX, BUFFER_CAPACITY, false);
+    m_sender.init(BUFFER_NAME_RX, false);
     m_running.store(true, std::memory_order_release);
     CreateThread(nullptr, 0, &MyHook::ThreadWrapperCreator, this, 0, nullptr);
 }
@@ -129,6 +131,20 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
     }
 }
 
+LONG WINAPI VehHandler(PEXCEPTION_POINTERS exc)
+{
+    if (exc->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
+        MyHook::getInstance().m_log << std::format(
+            "[VEH] Access violation at address: {:#x}\n",
+            reinterpret_cast<uintptr_t>(exc->ExceptionRecord->ExceptionAddress)
+        );
+
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 DWORD MyHook::ThreadsCreator()
 {
     std::string folderName = g_params.logDumpLocation + "dump_" + Logger::GetTimestamp() + "\\";
@@ -138,6 +154,8 @@ DWORD MyHook::ThreadsCreator()
 
     m_threadsHandler.emplace_back(
         std::jthread(&MyHook::ThreadWrapperMsg, this));
+
+    AddVectoredExceptionHandler(1, VehHandler);
 
     return 0;
 }

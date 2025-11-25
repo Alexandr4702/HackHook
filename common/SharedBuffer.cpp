@@ -1,10 +1,20 @@
 #include "common/SharedBuffer.h"
 #include <algorithm>
 
-SharedBuffer::SharedBuffer(const std::string &shm_name, std::size_t capacity, bool create)
-    : m_shm_name(shm_name), m_creator(create)
+void SharedBuffer::init(const std::string &shm_name, std::size_t capacity, bool create)
 {
-    if (create)
+    // Cleanup old buffer if re-init
+    if (m_buf)
+    {
+        if (m_creator)
+            bip::shared_memory_object::remove(m_shm_name.c_str());
+
+        m_buf = nullptr;
+        start_segment_ptr = nullptr;
+    }
+
+    m_creator = create;
+    if (m_creator)
     {
         bip::shared_memory_object::remove(shm_name.c_str());
 
