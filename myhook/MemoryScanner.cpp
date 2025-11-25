@@ -6,7 +6,6 @@
 #include <span>
 #include <string_view>
 #include <algorithm>
-#include <functional>
 #include <immintrin.h> // AVX2
 
 #include <vector>
