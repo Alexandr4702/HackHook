@@ -109,60 +109,11 @@ static inline bool simd_compare_any(const uint8_t *hay, const uint8_t *pat, size
 
 // Search all occurrences (including overlapping) of pat in hay using BMH with AVX2-accelerated
 // last-byte scanning and SIMD full-match. Supports arbitrary pat_len (>=1).
-std::vector<size_t> bmh_simd_avx2_all_extended(const uint8_t *hay, size_t hay_len, const uint8_t *pat, size_t pat_len)
-{
-    std::vector<size_t> result;
-    if (pat_len == 0)
-        return result;
-    if (hay_len < pat_len)
-        return result;
-
-    // build skip table (size_t)
-    std::vector<size_t> skip(256, pat_len);
-    for (size_t i = 0; i + 1 < pat_len; ++i)
-    {
-        skip[(unsigned char)pat[i]] = pat_len - 1 - i;
-    }
-
-    const uint8_t last = pat[pat_len - 1];
-    size_t pos = 0;
-
-    while (pos + pat_len <= hay_len)
-    {
-        size_t search_start = pos + pat_len - 1;
-        size_t remain = hay_len - search_start;
-
-        // find next candidate last-byte (relative)
-        size_t rel = find_byte_avx2(hay + search_start, remain, last);
-        if (rel == remain)
-        {
-            return result; // no more candidates
-        }
-
-        size_t candidate_end = search_start + rel;
-        size_t candidate_pos = candidate_end - (pat_len - 1);
-
-        // full SIMD comparison for arbitrary length
-        if (simd_compare_any(hay + candidate_pos, pat, pat_len))
-        {
-            result.push_back(candidate_pos);
-            // advance by 1 to allow overlapping matches
-            pos = candidate_pos + 1;
-            continue;
-        }
-
-        // BMH skip using the bad-char at candidate_end
-        unsigned char bad = hay[candidate_end];
-        pos = candidate_pos + skip[bad];
-    }
-
-    return result;
-}
 
 std::vector<size_t> bmh_simd_avx2_all_extended(const uint8_t *hay, size_t hay_len, const SimdBmhAvx2Searcher &searcher)
 {
     const uint8_t *pat = searcher.pat;
-    size_t pat_len = searcher.pat_len;
+    size_t pat_len = searcher.size;
     const auto &skip = searcher.skip;
 
     std::vector<size_t> result;

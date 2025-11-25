@@ -34,9 +34,10 @@ TEST(BMH_SIMD_BENCH, CompareWithFindAll)
     // ---------------- SIMD-BMH search ----------------
     auto start_simd = std::chrono::high_resolution_clock::now();
 
+    SimdBmhAvx2Searcher skip_table(PATTERN.data());
     auto simd_matches = bmh_simd_avx2_all_extended(
         text.data(), text.size(),
-        reinterpret_cast<const uint8_t*>(PATTERN.data()), PATTERN.size()
+        skip_table
     );
 
     auto end_simd = std::chrono::high_resolution_clock::now();
