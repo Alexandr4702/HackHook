@@ -12,24 +12,6 @@
 #include <array>
 #include <windows.h>
 
-// Boyer-Moore-Horspool pattern structure with precomputed shift table
-struct BMHPattern {
-    std::vector<uint8_t> pattern;       // pattern bytes
-    std::array<size_t, 256> shift;      // shift table for each possible byte
-
-    explicit BMHPattern(std::span<const uint8_t> p) : pattern(p.begin(), p.end()) {
-        size_t len = pattern.size();
-
-        shift.fill(len);  // default shift = pattern length
-        for (size_t i = 0; i + 1 < len; ++i) {
-            shift[pattern[i]] = len - i - 1;  // compute shifts
-        }
-    }
-
-    size_t size() const { return pattern.size(); }
-    const uint8_t* data() const { return pattern.data(); }
-};
-
 std::vector<MEMORY_BASIC_INFORMATION> enum_regions()
 {
     std::vector<MEMORY_BASIC_INFORMATION> regions;
@@ -86,7 +68,6 @@ std::vector<FoundOccurrences> find(std::span<const uint8_t> pattern)
 {
     std::vector<FoundOccurrences> result;
     std::vector<MEMORY_BASIC_INFORMATION> regions = enum_regions();
-    const std::boyer_moore_horspool_searcher<const uint8_t *> searcher(pattern.data(), pattern.data() + pattern.size());
     std::vector<std::future<std::vector<FoundOccurrences>>> features;
 
     std::erase_if(regions, [](MEMORY_BASIC_INFORMATION &region) {
@@ -102,10 +83,12 @@ std::vector<FoundOccurrences> find(std::span<const uint8_t> pattern)
     std::vector<std::thread> thread_pool;
     std::vector<std::vector<FoundOccurrences>> results(number_of_threads);
     std::mutex mtx;
+    const std::boyer_moore_horspool_searcher<const uint8_t*> searcher(pattern.data(), pattern.data() + pattern.size());
+    const SimdBmhAvx2Searcher searcher_Avx2(pattern.data(), pattern.size());
 
     PVOID veh_handle = AddVectoredExceptionHandler(1, veh_handler);
 
-    auto worker = [&regions, &mtx, &searcher, &pattern, &results](int threadId) {
+    auto worker = [&regions, &mtx, &searcher, &searcher_Avx2, &pattern, &results](int threadId) {
         std::vector<FoundOccurrences> &local = results[threadId];
         while (true)
         {
@@ -116,9 +99,12 @@ std::vector<FoundOccurrences> find(std::span<const uint8_t> pattern)
             regions.pop_back();
             lck.unlock();
 
-            std::vector<size_t> matches = find_all(
-                std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(region.BaseAddress), region.RegionSize),
-                searcher);
+            // std::vector<size_t> matches = find_all(
+            //     std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(region.BaseAddress), region.RegionSize),
+            //     searcher);
+
+            std::vector<size_t> matches = bmh_simd_avx2_all_extended(
+                reinterpret_cast<const uint8_t *>(region.BaseAddress), region.RegionSize, searcher_Avx2);
 
             for (auto &match : matches)
             {
