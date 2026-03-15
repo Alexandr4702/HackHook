@@ -66,6 +66,22 @@ std::vector<size_t> find_all(
     return matches;
 }
 
+LONG CALLBACK veh_handler(EXCEPTION_POINTERS* e)
+{
+    if (e->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
+    {
+        // Skip the faulting instruction
+#ifdef _M_X64
+        e->ContextRecord->Rip += 1;
+#else
+        e->ContextRecord->Eip += 1;
+#endif
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 std::vector<FoundOccurrences> find(std::span<const uint8_t> pattern)
 {
     std::vector<FoundOccurrences> result;
@@ -74,6 +90,8 @@ std::vector<FoundOccurrences> find(std::span<const uint8_t> pattern)
     std::vector<std::future<std::vector<FoundOccurrences>>> features;
 
     std::erase_if(regions, [](MEMORY_BASIC_INFORMATION &region) {
+        if (region.State != MEM_COMMIT)
+            return true;
         bool readable =
             (region.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)) &&
             !(region.Protect & PAGE_GUARD);
@@ -84,6 +102,8 @@ std::vector<FoundOccurrences> find(std::span<const uint8_t> pattern)
     std::vector<std::thread> thread_pool;
     std::vector<std::vector<FoundOccurrences>> results(number_of_threads);
     std::mutex mtx;
+
+    PVOID veh_handle = AddVectoredExceptionHandler(1, veh_handler);
 
     auto worker = [&regions, &mtx, &searcher, &pattern, &results](int threadId) {
         std::vector<FoundOccurrences> &local = results[threadId];
@@ -129,5 +149,6 @@ std::vector<FoundOccurrences> find(std::span<const uint8_t> pattern)
                       std::make_move_iterator(results[threadId].end()));
     }
 
+    RemoveVectoredExceptionHandler(veh_handle);
     return result;
 }
