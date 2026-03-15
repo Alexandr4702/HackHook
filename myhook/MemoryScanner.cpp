@@ -66,55 +66,67 @@ std::vector<size_t> find_all(
     return matches;
 }
 
-
 std::vector<FoundOccurrences> find(std::span<const uint8_t> pattern)
 {
     std::vector<FoundOccurrences> result;
     std::vector<MEMORY_BASIC_INFORMATION> regions = enum_regions();
-    std::boyer_moore_horspool_searcher<const uint8_t*> searcher(pattern.data(), pattern.data() + pattern.size());
+    const std::boyer_moore_horspool_searcher<const uint8_t *> searcher(pattern.data(), pattern.data() + pattern.size());
     std::vector<std::future<std::vector<FoundOccurrences>>> features;
 
-    for (auto &region : regions)
-    {
-        // if (region.State != MEM_COMMIT)
-        //     continue;
-        bool readable = (region.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)) &&
-                !(region.Protect & PAGE_GUARD);
+    std::erase_if(regions, [](MEMORY_BASIC_INFORMATION &region) {
+        bool readable =
+            (region.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)) &&
+            !(region.Protect & PAGE_GUARD);
+        return !readable;
+    });
 
-        // if ((region.State == MEM_COMMIT) && region.Protect != PAGE_NOACCESS && !(region.Protect & PAGE_GUARD))
-        if (readable)
+    auto number_of_threads = std::max(1u, std::thread::hardware_concurrency());
+    std::vector<std::thread> thread_pool;
+    std::vector<std::vector<FoundOccurrences>> results(number_of_threads);
+    std::mutex mtx;
+
+    auto worker = [&regions, &mtx, &searcher, &pattern, &results](int threadId) {
+        std::vector<FoundOccurrences> &local = results[threadId];
+        while (true)
         {
-            features.emplace_back(std::async(
-                std::launch::async,
-                [&searcher, &pattern](const MEMORY_BASIC_INFORMATION &region) {
+            std::unique_lock lck(mtx);
+            if (regions.empty())
+                return;
+            auto region = regions.back();
+            regions.pop_back();
+            lck.unlock();
 
-                    std::vector<FoundOccurrences> local;
+            std::vector<size_t> matches = find_all(
+                std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(region.BaseAddress), region.RegionSize),
+                searcher);
 
-                    std::vector<size_t> matches = find_all(
-                        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(region.BaseAddress), region.RegionSize),
-                        searcher);
-
-                    for (auto &match : matches)
-                    {
-                        FoundOccurrences found;
-                        found.baseAddress = reinterpret_cast<uint64_t> (region.BaseAddress);
-                        found.offset = match;
-                        found.region_size = region.RegionSize;
-                        found.data_size = pattern.size();
-                        found.type = region.Type;
-                        local.emplace_back(found);
-                    }
-
-                    return local;
-                },
-                region));
+            for (auto &match : matches)
+            {
+                FoundOccurrences found;
+                found.baseAddress = reinterpret_cast<uint64_t>(region.BaseAddress);
+                found.offset = match;
+                found.region_size = region.RegionSize;
+                found.data_size = pattern.size();
+                found.type = region.Type;
+                local.emplace_back(found);
+            }
         }
+    };
+
+    for (int threadId{0}; threadId < number_of_threads; ++threadId)
+    {
+        thread_pool.push_back(std::thread(worker, threadId));
     }
 
-    for (auto &f : features)
+    for (int threadId{0}; threadId < number_of_threads; ++threadId)
     {
-        auto part = f.get();
-        result.insert(result.end(), std::make_move_iterator(part.begin()), std::make_move_iterator(part.end()));
+        thread_pool[threadId].join();
+    }
+
+    for (int threadId{0}; threadId < number_of_threads; ++threadId)
+    {
+        result.insert(result.end(), std::make_move_iterator(results[threadId].begin()),
+                      std::make_move_iterator(results[threadId].end()));
     }
 
     return result;
