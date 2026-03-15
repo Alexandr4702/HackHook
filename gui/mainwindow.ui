@@ -50,6 +50,13 @@
        </widget>
       </item>
       <item>
+       <widget class="QPushButton" name="pressKeyButton">
+        <property name="text">
+         <string>Press Key</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <spacer name="hookSpacerRight">
         <property name="orientation">
          <enum>Qt::Orientation::Horizontal</enum>
@@ -74,8 +81,7 @@
        </widget>
       </item>
       <item>
-       <widget class="QComboBox" name="valueTypeCombo">
-       </widget>
+       <widget class="QComboBox" name="valueTypeCombo"/>
       </item>
       <item>
        <widget class="QPushButton" name="firstScanButton">
@@ -98,41 +104,41 @@
       <property name="columnCount">
        <number>7</number>
       </property>
-    <column>
+      <column>
        <property name="text">
         <string>Value</string>
        </property>
       </column>
-    <column>
+      <column>
        <property name="text">
         <string>Base address</string>
        </property>
       </column>
-    <column>
+      <column>
        <property name="text">
         <string>offset</string>
        </property>
       </column>
-    <column>
+      <column>
        <property name="text">
         <string>region_size</string>
        </property>
       </column>
-    <column>
+      <column>
        <property name="text">
         <string>data_size</string>
        </property>
       </column>
-    <column>
+      <column>
        <property name="text">
         <string>type</string>
        </property>
       </column>
-    <column>
+      <column>
        <property name="text">
         <string>property</string>
        </property>
-    </column>
+      </column>
      </widget>
     </item>
     <item>

@@ -28,11 +28,12 @@ class MainWindow : public QMainWindow
     void HandleMessage(const Interface::CommandEnvelope *msg);
 
   private slots:
-    void onWindowSelectorOpened();
+    void on_windowSelectorOpened();
     void on_hookButton_clicked();
     void on_dumpButton_clicked();
     void on_firstScanButton_clicked();
     void on_nextScanButton_clicked();
+    void on_pressKeyButton_clicked();
 
   private:
     Ui::MainWindow *ui;

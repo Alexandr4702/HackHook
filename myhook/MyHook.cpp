@@ -18,6 +18,8 @@
 #include "MemDumper.h"
 #include "MemoryScanner.h"
 
+void SendKeyToWindow(HWND hWnd, char key);
+
 MyHook::MyHook()
 {
     // std::string folderName = g_params.logDumpLocation + "dump_" + GetTimestamp() + "\\";
@@ -116,6 +118,14 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
 
         break;
     }
+    case Interface::CommandID_PRESS_KEY: {
+        const HWND hwnd = reinterpret_cast<HWND>(msg->body_as_PressKeyCommand()->hwnd());
+        const char key = msg->body_as_PressKeyCommand()->key();
+        SendKeyToWindow(hwnd, key);
+        m_sender.send_command(Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE,
+                              Interface::CreateEmptyCommand);
+        break;
+    }
     default:
         break;
     }
@@ -139,15 +149,14 @@ void SendKeyToWindow(HWND hWnd, char key)
 {
     if (!hWnd || !IsWindow(hWnd))
     {
-        // g_log << "[ERROR] Invalid window handle\n";
+        MyHook::getInstance().m_log << "[ERROR] Invalid window handle\n";
         return;
     }
 
     PostMessage(hWnd, WM_KEYDOWN, key, 0x00000001);
     Sleep(10);
     PostMessage(hWnd, WM_KEYUP, key, 0xC0000001);
-
-    // g_log << "[KEY] Sent key '" << key << "' to window\n";
+    MyHook::getInstance().m_log << std::format("[KEY] Sent key '{}' to window\n", key);
 }
 
 

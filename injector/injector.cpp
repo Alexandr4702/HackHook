@@ -64,12 +64,12 @@ void Injector::unhook()
 
 DWORD Injector::getThreadId(const std::wstring &windowName)
 {
-    HWND hwnd = FindWindowW(nullptr, windowName.c_str());
-    if (!hwnd)
+    m_hwnd = FindWindowW(nullptr, windowName.c_str());
+    if (!m_hwnd)
         return 0;
 
     DWORD pid = 0;
-    return GetWindowThreadProcessId(hwnd, &pid);
+    return GetWindowThreadProcessId(m_hwnd, &pid);
 }
 
 std::string Injector::getDllPath(const std::string &dllName)

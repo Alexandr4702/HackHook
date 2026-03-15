@@ -10,6 +10,7 @@ enum CommandID : byte {
   FIND,
   FIND_ACK,
   DUMP,
+  PRESS_KEY,
   ACK,
   NACK,
 }
@@ -75,9 +76,16 @@ table EmptyCommand
   
 }
 
+table PressKeyCommand
+{
+  hwnd: ulong;
+  key: ubyte;
+}
+
 union Command {
   WriteCommand,
   ReadCommand,
+  PressKeyCommand,
   ReadAck,
   FindCommand,
   FindAck,

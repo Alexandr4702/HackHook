@@ -32,7 +32,7 @@ MainWindow::MainWindow(QWidget *parent)
         ui->valueTypeCombo->addItem(text, static_cast<int>(type));
     }
     m_recive_thread = std::jthread(&MainWindow::MsgConsumerThread, this);
-    connect(ui->windowSelectorCombo, &WindowSelectorCombo::aboutToShowPopup, this, &MainWindow::onWindowSelectorOpened);
+    connect(ui->windowSelectorCombo, &WindowSelectorCombo::aboutToShowPopup, this, &MainWindow::on_windowSelectorOpened);
 }
 
 MainWindow::~MainWindow()
@@ -164,7 +164,7 @@ void MainWindow::refreshWindowList()
     EnumWindows(EnumWindowsProc, reinterpret_cast<LPARAM>(ui->windowSelectorCombo));
 }
 
-void MainWindow::onWindowSelectorOpened()
+void MainWindow::on_windowSelectorOpened()
 {
     ui->windowSelectorCombo->clear();
 
@@ -328,4 +328,15 @@ void MainWindow::on_nextScanButton_clicked()
     }
 
     qDebug() << "on_nextScan_clicked";
+}
+
+void MainWindow::on_pressKeyButton_clicked()
+{
+    if (!m_injector.isHooked())
+    {
+        return;
+    }
+    uint64_t hwnd = reinterpret_cast<uint64_t>(m_injector.getHWND());
+    m_sender.send_command(Interface::CommandID::CommandID_PRESS_KEY, Interface::Command::Command_PressKeyCommand,
+                          Interface::CreatePressKeyCommand, hwnd, 'R');
 }
