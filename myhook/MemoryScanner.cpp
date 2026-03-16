@@ -1,15 +1,13 @@
 #include "MemoryScanner.h"
 #include "BMH_SIMD.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <future>
 #include <span>
-#include <algorithm>
-#include <immintrin.h> // AVX2
 
 #include <vector>
-#include <array>
 #include <windows.h>
 
 std::vector<MEMORY_BASIC_INFORMATION> enum_regions()
@@ -28,27 +26,29 @@ std::vector<MEMORY_BASIC_INFORMATION> enum_regions()
     return regions;
 }
 
-std::vector<size_t> find_all(
-    std::span<const uint8_t> haystack,
-    const std::boyer_moore_horspool_searcher<const uint8_t*>& searcher)
+std::vector<size_t> find_all(std::span<const uint8_t> haystack,
+                             const std::boyer_moore_horspool_searcher<const uint8_t *> &searcher)
 {
     std::vector<size_t> matches;
     auto it = haystack.begin();
 
-    while (it != haystack.end()) {
+    while (it != haystack.end())
+    {
         auto found = std::search(it, haystack.end(), searcher);
-        if (found == haystack.end()) break;
+        if (found == haystack.end())
+            break;
 
         matches.push_back(std::distance(haystack.begin(), found));
 
-        if (found == haystack.end() - 1) break;
+        if (found == haystack.end() - 1)
+            break;
         it = found + 1;
     }
 
     return matches;
 }
 
-LONG CALLBACK veh_handler(EXCEPTION_POINTERS* e)
+LONG CALLBACK veh_handler(EXCEPTION_POINTERS *e)
 {
     if (e->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
     {
@@ -83,7 +83,7 @@ std::vector<FoundOccurrences> find(std::span<const uint8_t> pattern)
     std::vector<std::thread> thread_pool;
     std::vector<std::vector<FoundOccurrences>> results(number_of_threads);
     std::mutex mtx;
-    const std::boyer_moore_horspool_searcher<const uint8_t*> searcher(pattern.data(), pattern.data() + pattern.size());
+    const std::boyer_moore_horspool_searcher<const uint8_t *> searcher(pattern.data(), pattern.data() + pattern.size());
     const SimdBmhAvx2Searcher searcher_Avx2(pattern.data(), pattern.size());
 
     PVOID veh_handle = AddVectoredExceptionHandler(1, veh_handler);
