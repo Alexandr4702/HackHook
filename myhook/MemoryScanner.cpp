@@ -9,6 +9,10 @@
 
 #include <vector>
 #include <windows.h>
+#include <setjmp.h>
+
+// Jmp point for veh fail
+thread_local jmp_buf g_jump;
 
 std::vector<MEMORY_BASIC_INFORMATION> enum_regions()
 {
@@ -52,13 +56,7 @@ LONG CALLBACK veh_handler(EXCEPTION_POINTERS *e)
 {
     if (e->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
     {
-        // Skip the faulting instruction
-#ifdef _M_X64
-        e->ContextRecord->Rip += 1;
-#else
-        e->ContextRecord->Eip += 1;
-#endif
-        return EXCEPTION_CONTINUE_EXECUTION;
+        longjmp(g_jump, 1);
     }
 
     return EXCEPTION_CONTINUE_SEARCH;
@@ -98,6 +96,11 @@ std::vector<FoundOccurrences> find(std::span<const uint8_t> pattern)
             auto region = regions.back();
             regions.pop_back();
             lck.unlock();
+
+            if (setjmp(g_jump) != 0)
+            {
+                continue;
+            }
 
             // std::vector<size_t> matches = find_all(
             //     std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(region.BaseAddress), region.RegionSize),
