@@ -13,6 +13,7 @@
 #include <vector>
 #include <windows.h>
 #include <setjmp.h>
+#include <psapi.h>
 
 #include <processthreadsapi.h>
 
@@ -47,6 +48,29 @@ std::vector<MEMORY_BASIC_INFORMATION> enum_regions()
     }
 
     return regions;
+}
+
+Region GetMyDllRegion()
+{
+    HMODULE hModule = nullptr;
+    if (!GetModuleHandleEx(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCSTR>(&GetMyDllRegion),
+            &hModule))
+    {
+        return {nullptr, nullptr};
+    }
+
+    MODULEINFO mi{};
+    if (!GetModuleInformation(GetCurrentProcess(), hModule, &mi, sizeof(mi)))
+    {
+        return {nullptr, nullptr};
+    }
+
+    Region r;
+    r.start = reinterpret_cast<uint8_t*>(mi.lpBaseOfDll);
+    r.end   = r.start + mi.SizeOfImage;
+    return r;
 }
 
 std::vector<size_t> find_all(std::span<const uint8_t> haystack,
@@ -106,6 +130,7 @@ std::vector<FoundOccurrences> find(std::span<const uint8_t> pattern)
     std::vector<Region> excludedRegions;
 
     excludedRegions.push_back(GetCurrentThreadStackRegion());
+    excludedRegions.push_back(GetMyDllRegion());
 
     // Get page size
     SYSTEM_INFO si;
