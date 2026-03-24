@@ -7,6 +7,8 @@
 #include <vector>
 #include <thread>
 
+#include <memory_resource>
+
 class MyHook
 {
   public:
@@ -16,13 +18,13 @@ class MyHook
         return instance;
     }
     MyHook();
+    ~MyHook();
 
     void start();
     void stop();
 
     Logger m_log;
   private:
-    ~MyHook() = default;
     MyHook(const MyHook &) = delete;
     MyHook &operator=(const MyHook &) = delete;
 
@@ -38,6 +40,11 @@ class MyHook
     HWND m_targetHwnd = nullptr;
     MessageIPCSender m_sender;
     SharedBuffer m_reciver;
+  
+    const size_t allocate_size = 32 * 1024 * 1024;
+    void* m_pmrPoolMem = nullptr;
+    std::pmr::monotonic_buffer_resource m_pmrPool;
+    std::pmr::synchronized_pool_resource m_pool;
 
     void HandleMessage(const Interface::CommandEnvelope *msg);
 

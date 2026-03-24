@@ -117,13 +117,6 @@ Region GetCurrentThreadStackRegion()
 
 std::vector<FoundOccurrences> find(std::span<const uint8_t> pattern)
 {
-
-    // void* mem = VirtualAlloc(nullptr, 10 * 1024 * 1024,
-    //                      MEM_COMMIT | MEM_RESERVE,
-    //                      PAGE_READWRITE);
-    // std::pmr::monotonic_buffer_resource pool(mem, 10 * 1024 * 1024);
-    // std::pmr::vector<MEMORY_BASIC_INFORMATION> regions(&pool);
-
     std::vector<FoundOccurrences> result;
     std::vector<MEMORY_BASIC_INFORMATION> regions = enum_regions();
     std::vector<std::future<std::vector<FoundOccurrences>>> features;

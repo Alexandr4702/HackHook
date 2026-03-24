@@ -1,4 +1,5 @@
 #include <atomic>
+#include <cstddef>
 #include <fstream>
 #include <thread>
 #include <string>
@@ -20,12 +21,28 @@
 
 void SendKeyToWindow(HWND hWnd, char key);
 
-MyHook::MyHook()
+MyHook::MyHook(): allocate_size(32 * 1024 * 1024), m_pmrPoolMem(VirtualAlloc(nullptr, allocate_size,
+                                MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)), m_pmrPool(m_pmrPoolMem, allocate_size), m_pool(&m_pmrPool)
 {
     // std::string folderName = g_params.logDumpLocation + "dump_" + GetTimestamp() + "\\";
     // g_params.logDumpLocation = folderName + "\\";
     // CreateDirectory(folderName.c_str(), nullptr);
     // g_log.init();
+
+    // m_pmrPool = std::pmr::monotonic_buffer_resource(m_pmrPoolMem, allocate_size);
+    // std::pmr::synchronized_pool_resource pool(&m_pmrPool);
+}
+
+MyHook::~MyHook()
+{
+    m_pool.release();
+    m_pmrPool.release();
+
+    if (m_pmrPoolMem)
+    {
+        VirtualFree(m_pmrPoolMem, 0, MEM_RELEASE);
+        m_pmrPoolMem = nullptr;
+    }
 }
 
 void MyHook::start()
@@ -171,7 +188,7 @@ void print(std::span<const uint8_t> bytes, std::stringstream &out)
 DWORD WINAPI MyHook::MsgConsumerThread()
 {
     using namespace Interface;
-    std::vector<uint8_t> buff;
+    std::vector<uint8_t> buff(m_pool);
     buff.resize(4);
 
     while (m_running.load(std::memory_order_acquire))
