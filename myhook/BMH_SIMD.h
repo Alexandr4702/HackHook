@@ -6,16 +6,7 @@
 #include <cstring>
 #include <immintrin.h>
 #include <vector>
-
-#ifdef _WIN32
-    #ifdef MYHOOK_BUILD
-        #define MYHOOK_API __declspec(dllexport)
-    #else
-        #define MYHOOK_API __declspec(dllimport)
-    #endif
-#else
-    #define MYHOOK_API
-#endif
+#include "MyHookImport.h"
 
 struct SimdBmhAvx2Searcher
 {

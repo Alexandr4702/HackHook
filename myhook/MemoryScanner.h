@@ -2,11 +2,11 @@
 #define BOYERMOOREHORSPOOL_H
 
 #include <vector>
-#include <tuple>
 #include <cstdint>
 #include <span>
 #include <functional>
-#include "BMH_SIMD.h"
+#include <memory_resource>
+#include "MyHookImport.h"
 
 struct FoundOccurrences
 {
@@ -17,9 +17,21 @@ struct FoundOccurrences
     int32_t type;
 };
 
-std::vector<FoundOccurrences> find(std::span<const uint8_t> pattern);
-MYHOOK_API std::vector<size_t> find_all(
-    std::span<const uint8_t> haystack,
-    const std::boyer_moore_horspool_searcher<const uint8_t*>& searcher);
+struct Region
+{
+    uint8_t *start;
+    uint8_t *end;
+    auto operator<=>(const Region &b) const noexcept
+    {
+        return start == b.start ? end <=> b.end : start <=> b.start;
+    }
 
+    bool crosses(const Region &b) const noexcept
+    {
+        return !(end <= b.start || start >= b.end);
+    }
+};
+
+// std::vector<FoundOccurrences> find(std::span<const uint8_t> pattern);
+std::pmr::vector<FoundOccurrences> find(std::span<const uint8_t> patter, std::pmr::synchronized_pool_resource& pool, Region exludeReg);
 #endif // BOYERMOOREHORSPOOL_H

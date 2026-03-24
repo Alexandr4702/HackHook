@@ -43,7 +43,7 @@ class MyHook
   
     const size_t allocate_size = 32 * 1024 * 1024;
     void* m_pmrPoolMem = nullptr;
-    std::pmr::monotonic_buffer_resource m_pmrPool;
+    std::pmr::monotonic_buffer_resource m_monotonicPool;
     std::pmr::synchronized_pool_resource m_pool;
 
     void HandleMessage(const Interface::CommandEnvelope *msg);

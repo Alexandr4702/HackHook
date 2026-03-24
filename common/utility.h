@@ -2,6 +2,7 @@
 #define UTILITY_H
 
 #include "common/common.h"
+#include <algorithm>
 #include <bit>
 #include <format>
 #include <fstream>
@@ -104,7 +105,9 @@ class MessageIPCSender
         std::memcpy(m_buffer.data(), &len, sizeof(len));
         std::memcpy(m_buffer.data() + sizeof(uint32_t), buf_ptr, len);
 
-        return m_sharedBufferTx.produce_block(m_buffer);
+        bool result = m_sharedBufferTx.produce_block(m_buffer);
+        std::fill(m_buffer.begin(), m_buffer.end(), 0);
+        return result;
     }
 
     inline void * get_shared_buffer_pointer()

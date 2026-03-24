@@ -1,5 +1,6 @@
 #include "MemoryScanner.h"
 #include "BMH_SIMD.h"
+#include "MyHook.h"
 
 #include <algorithm>
 #include <atomic>
@@ -19,20 +20,6 @@
 
 // Jmp point for veh fail
 thread_local jmp_buf g_jump;
-
-struct Region {
-    uint8_t* start;
-    uint8_t* end;
-    auto operator<=>(const Region& b) const noexcept
-    {
-        return start == b.start ? end <=> b.end : start <=> b.start; 
-    }
-
-    bool crosses(const Region& b) const noexcept
-    {
-        return !(end <= b.start || start >= b.end);
-    }
-};
 
 std::vector<MEMORY_BASIC_INFORMATION> enum_regions()
 {
@@ -73,28 +60,6 @@ Region GetMyDllRegion()
     return r;
 }
 
-std::vector<size_t> find_all(std::span<const uint8_t> haystack,
-                             const std::boyer_moore_horspool_searcher<const uint8_t *> &searcher)
-{
-    std::vector<size_t> matches;
-    auto it = haystack.begin();
-
-    while (it != haystack.end())
-    {
-        auto found = std::search(it, haystack.end(), searcher);
-        if (found == haystack.end())
-            break;
-
-        matches.push_back(std::distance(haystack.begin(), found));
-
-        if (found == haystack.end() - 1)
-            break;
-        it = found + 1;
-    }
-
-    return matches;
-}
-
 LONG CALLBACK veh_handler(EXCEPTION_POINTERS *e)
 {
     if (e->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
@@ -115,15 +80,15 @@ Region GetCurrentThreadStackRegion()
     return currentThreadStack;
 }
 
-std::vector<FoundOccurrences> find(std::span<const uint8_t> pattern)
+std::pmr::vector<FoundOccurrences> find(std::span<const uint8_t> pattern, std::pmr::synchronized_pool_resource& pool, Region exludeReg)
 {
-    std::vector<FoundOccurrences> result;
+    std::pmr::vector<FoundOccurrences> result(&pool);
     std::vector<MEMORY_BASIC_INFORMATION> regions = enum_regions();
-    std::vector<std::future<std::vector<FoundOccurrences>>> features;
     std::vector<Region> excludedRegions;
 
     excludedRegions.push_back(GetCurrentThreadStackRegion());
     excludedRegions.push_back(GetMyDllRegion());
+    excludedRegions.push_back(exludeReg);
 
     // Get page size
     SYSTEM_INFO si;

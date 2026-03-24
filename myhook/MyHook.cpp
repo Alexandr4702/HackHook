@@ -22,7 +22,7 @@
 void SendKeyToWindow(HWND hWnd, char key);
 
 MyHook::MyHook(): allocate_size(32 * 1024 * 1024), m_pmrPoolMem(VirtualAlloc(nullptr, allocate_size,
-                                MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)), m_pmrPool(m_pmrPoolMem, allocate_size), m_pool(&m_pmrPool)
+                                MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)), m_monotonicPool(m_pmrPoolMem, allocate_size), m_pool(&m_monotonicPool)
 {
     // std::string folderName = g_params.logDumpLocation + "dump_" + GetTimestamp() + "\\";
     // g_params.logDumpLocation = folderName + "\\";
@@ -36,7 +36,7 @@ MyHook::MyHook(): allocate_size(32 * 1024 * 1024), m_pmrPoolMem(VirtualAlloc(nul
 MyHook::~MyHook()
 {
     m_pool.release();
-    m_pmrPool.release();
+    m_monotonicPool.release();
 
     if (m_pmrPoolMem)
     {
@@ -100,21 +100,21 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
 
         auto data_vector = msg->body_as_FindCommand()->data();
         auto value_type = msg->body_as_FindCommand()->value_type();
+        std::pmr::vector<uint8_t> pattern(data_vector->data(), data_vector->data() + data_vector->size(), &m_pool);
 
-        std::vector<uint8_t> pattern = {data_vector->data(), data_vector->data() + data_vector->size()};
-        
         m_log << std::format("[MyHook] Pattern size: {} \n", pattern.size());
-        std::vector<FoundOccurrences> results = find(pattern);
+        auto  results = find(pattern, m_pool, Region(reinterpret_cast<uint8_t*>(m_pmrPoolMem), reinterpret_cast<uint8_t*>(m_pmrPoolMem) + allocate_size));
         uint64_t m_reciver_address = reinterpret_cast<uint64_t>(m_reciver.get_shared_buffer_pointer());
         uint64_t m_sender_address = reinterpret_cast<uint64_t>(m_sender.get_shared_buffer_pointer());
 
         m_log << std::format("[MyHook] Found {} results \n", results.size());
 
-        auto createFindAck = [m_reciver_address, m_sender_address](flatbuffers::FlatBufferBuilder &builder, std::vector<uint8_t> value_data,
+        auto createFindAck = [this, m_reciver_address, m_sender_address](flatbuffers::FlatBufferBuilder &builder, const auto& value_data,
                                 Interface::ValueType value_type,
-                                const std::vector<FoundOccurrences> &occs_vec) -> flatbuffers::Offset<Interface::FindAck> {
+                                const auto& occs_vec) -> flatbuffers::Offset<Interface::FindAck> {
             // occurrences
-            std::vector<flatbuffers::Offset<Interface::FoundOccurrences>> occs_fb;
+            std::pmr::vector<flatbuffers::Offset<Interface::FoundOccurrences>> occs_fb(&m_pool);
+            occs_fb.reserve(occs_vec.size());
             for (const auto &o : occs_vec)
             {
                 if (o.baseAddress == m_reciver_address || o.baseAddress == m_sender_address)
@@ -188,7 +188,7 @@ void print(std::span<const uint8_t> bytes, std::stringstream &out)
 DWORD WINAPI MyHook::MsgConsumerThread()
 {
     using namespace Interface;
-    std::vector<uint8_t> buff(m_pool);
+    std::pmr::vector<uint8_t> buff(&m_pool);
     buff.resize(4);
 
     while (m_running.load(std::memory_order_acquire))
