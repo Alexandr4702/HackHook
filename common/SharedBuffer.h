@@ -26,8 +26,12 @@ public:
     void close();
     void reset();
 
-    inline void* get_shared_buffer_pointer() { return start_segment_ptr; }
-
+    inline void *get_shared_buffer_pointer()
+    {return start_segment_ptr;}
+    inline const size_t get_shared_buffer_size()
+    {return m_size;}
+    size_t m_size;
+    void* start_segment_ptr = nullptr;
 private:
     struct Buffer
     {
@@ -49,7 +53,6 @@ private:
     std::string m_shm_name;
     bip::managed_shared_memory m_shm;
     Buffer* m_buf = nullptr;
-    void* start_segment_ptr = nullptr;
     bool m_creator;
 };
 

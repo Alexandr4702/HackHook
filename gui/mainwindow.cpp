@@ -144,12 +144,13 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
             table->insertRow(row);
 
             table->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(value)));
-            table->setItem(row, 1, new QTableWidgetItem("0x" + QString::number(found.baseAddress, 16))); // hex
-            table->setItem(row, 2, new QTableWidgetItem(QString::number(found.offset)));
-            table->setItem(row, 3, new QTableWidgetItem(QString::number(found.region_size)));
-            table->setItem(row, 4, new QTableWidgetItem(QString::number(found.data_size)));
-            table->setItem(row, 5, new QTableWidgetItem(QString::fromStdString(valueTypes[value_type].first)));
-            table->setItem(row, 6, new QTableWidgetItem(""));
+            table->setItem(row, 1, new QTableWidgetItem("0x" + QString::number(found.baseAddress + found.offset, 16))); // hex
+            table->setItem(row, 2, new QTableWidgetItem("0x" + QString::number(found.baseAddress, 16))); // hex
+            table->setItem(row, 3, new QTableWidgetItem(QString::number(found.offset)));
+            table->setItem(row, 4, new QTableWidgetItem(QString::number(found.region_size)));
+            table->setItem(row, 5, new QTableWidgetItem(QString::number(found.data_size)));
+            table->setItem(row, 6, new QTableWidgetItem(QString::fromStdString(valueTypes[value_type].first)));
+            table->setItem(row, 7, new QTableWidgetItem(""));
         }
         break;
     }
@@ -200,7 +201,9 @@ void MainWindow::on_hookButton_clicked()
         }
         if (m_injector.hook(windowName))
         {
-            qDebug() << "HookInjected " << windowName;
+            DWORD pid = 0;
+            GetWindowThreadProcessId(m_injector.getHWND(), &pid);
+            qDebug() << std::format(L"HookInjected {} {} {}", windowName, reinterpret_cast<uintptr_t>(m_injector.getHWND()), pid);
             ui->hookButton->setText("Unhook");
             m_sender.reset();
             m_reciver.reset();

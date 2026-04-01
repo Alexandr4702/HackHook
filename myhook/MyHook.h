@@ -41,7 +41,7 @@ class MyHook
     MessageIPCSender m_sender;
     SharedBuffer m_reciver;
   
-    const size_t allocate_size = 32 * 1024 * 1024;
+    const size_t allocate_size = 128 * 1024 * 1024;
     void* m_pmrPoolMem = nullptr;
     std::pmr::monotonic_buffer_resource m_monotonicPool;
     std::pmr::synchronized_pool_resource m_pool;

@@ -90,16 +90,14 @@ class MessageIPCSender
 
         std::scoped_lock lck(m_mutex);
 
-        flatbuffers::FlatBufferBuilder builder;
+        auto body = create_fn(m_builder, std::forward<Args>(args)...);
 
-        auto body = create_fn(builder, std::forward<Args>(args)...);
+        auto envelope = Interface::CreateCommandEnvelope(m_builder, id, type, body.Union());
+        m_builder.Finish(envelope);
 
-        auto envelope = Interface::CreateCommandEnvelope(builder, id, type, body.Union());
-        builder.Finish(envelope);
+        auto buf_ptr = m_builder.GetBufferPointer();
 
-        auto buf_ptr = builder.GetBufferPointer();
-
-        const uint32_t len = builder.GetSize();
+        const uint32_t len = m_builder.GetSize();
 
         m_buffer.resize(len + sizeof(len));
         std::memcpy(m_buffer.data(), &len, sizeof(len));
@@ -107,6 +105,8 @@ class MessageIPCSender
 
         bool result = m_sharedBufferTx.produce_block(m_buffer);
         std::fill(m_buffer.begin(), m_buffer.end(), 0);
+        std::memset(m_builder.GetBufferPointer(), 0, m_builder.GetSize());
+        m_builder.Clear();
         return result;
     }
 
@@ -114,12 +114,17 @@ class MessageIPCSender
     {
         return m_sharedBufferTx.get_shared_buffer_pointer();
     }
+    inline const size_t get_shared_buffer_size()
+    {
+        return m_sharedBufferTx.m_size;
+    }
 
     void close();
     void reset();
 
   private:
     std::mutex m_mutex;
+    flatbuffers::FlatBufferBuilder m_builder;
     std::vector<uint8_t> m_buffer;
     SharedBuffer m_sharedBufferTx;
 };

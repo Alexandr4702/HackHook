@@ -80,7 +80,7 @@ Region GetCurrentThreadStackRegion()
     return currentThreadStack;
 }
 
-std::pmr::vector<FoundOccurrences> find(std::span<const uint8_t> pattern, std::pmr::synchronized_pool_resource& pool, Region exludeReg)
+std::pmr::vector<FoundOccurrences> find(std::span<const uint8_t> pattern, std::pmr::synchronized_pool_resource& pool, std::pmr::vector<Region>&& exludeReg)
 {
     std::pmr::vector<FoundOccurrences> result(&pool);
     std::vector<MEMORY_BASIC_INFORMATION> regions = enum_regions();
@@ -88,7 +88,7 @@ std::pmr::vector<FoundOccurrences> find(std::span<const uint8_t> pattern, std::p
 
     excludedRegions.push_back(GetCurrentThreadStackRegion());
     excludedRegions.push_back(GetMyDllRegion());
-    excludedRegions.push_back(exludeReg);
+    excludedRegions.insert(excludedRegions.end(), exludeReg.begin(), exludeReg.end());
 
     // Get page size
     SYSTEM_INFO si;
@@ -158,7 +158,6 @@ std::pmr::vector<FoundOccurrences> find(std::span<const uint8_t> pattern, std::p
 
     waitForAddingStacks.wait();
 
-    std::sort(excludedRegions.begin(), excludedRegions.end());
     std::erase_if(regions, [&excludedRegions](MEMORY_BASIC_INFORMATION &region) {
         if (region.State != MEM_COMMIT)
             return true;
@@ -174,20 +173,11 @@ std::pmr::vector<FoundOccurrences> find(std::span<const uint8_t> pattern, std::p
 
         uint8_t *baseAddress = reinterpret_cast<uint8_t *>(region.BaseAddress);
         Region currentRegion(baseAddress, baseAddress + region.RegionSize);
-        auto it = std::lower_bound(excludedRegions.begin(), excludedRegions.end(), currentRegion);
-        if (it != excludedRegions.begin())
-        {
-            auto prev = std::prev(it);
-            if (prev->crosses(currentRegion))
-                return true;
-        }
 
-        for (; it < excludedRegions.end(); ++it)
+        for (auto it = excludedRegions.begin(); it < excludedRegions.end(); ++it)
         {
             if (it->crosses(currentRegion))
                 return true;
-            if (it->start >= currentRegion.end)
-                break;
         }
 
         return false;

@@ -3,6 +3,7 @@
 
 void SharedBuffer::init(const std::string &shm_name, std::size_t capacity, bool create)
 {
+    m_size = sizeof(Buffer) + capacity + 64 * 1024;
     // Cleanup old buffer if re-init
     if (m_buf)
     {
@@ -17,14 +18,11 @@ void SharedBuffer::init(const std::string &shm_name, std::size_t capacity, bool 
     if (m_creator)
     {
         bip::shared_memory_object::remove(shm_name.c_str());
-
-        std::size_t shm_size = sizeof(Buffer) + capacity + 64 * 1024;
-
         bip::permissions perms;
         perms.set_unrestricted();
 
         m_shm = bip::managed_shared_memory(
-            bip::create_only, shm_name.c_str(), shm_size, 0, perms);
+            bip::create_only, shm_name.c_str(), m_size, 0, perms);
 
         m_buf = m_shm.construct<Buffer>("buffer")();
         m_buf->capacity = capacity;

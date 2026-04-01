@@ -32,6 +32,5 @@ struct Region
     }
 };
 
-// std::vector<FoundOccurrences> find(std::span<const uint8_t> pattern);
-std::pmr::vector<FoundOccurrences> find(std::span<const uint8_t> patter, std::pmr::synchronized_pool_resource& pool, Region exludeReg);
+std::pmr::vector<FoundOccurrences> find(std::span<const uint8_t> pattern, std::pmr::synchronized_pool_resource& pool, std::pmr::vector<Region>&& exludeReg);
 #endif // BOYERMOOREHORSPOOL_H

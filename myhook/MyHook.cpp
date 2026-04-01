@@ -21,7 +21,7 @@
 
 void SendKeyToWindow(HWND hWnd, char key);
 
-MyHook::MyHook(): allocate_size(32 * 1024 * 1024), m_pmrPoolMem(VirtualAlloc(nullptr, allocate_size,
+MyHook::MyHook(): allocate_size(128 * 1024 * 1024), m_pmrPoolMem(VirtualAlloc(nullptr, allocate_size,
                                 MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)), m_monotonicPool(m_pmrPoolMem, allocate_size), m_pool(&m_monotonicPool)
 {
     // std::string folderName = g_params.logDumpLocation + "dump_" + GetTimestamp() + "\\";
@@ -35,6 +35,8 @@ MyHook::MyHook(): allocate_size(32 * 1024 * 1024), m_pmrPoolMem(VirtualAlloc(nul
 
 MyHook::~MyHook()
 {
+    m_log << "[MyHook] Destroyed\n";
+
     m_pool.release();
     m_monotonicPool.release();
 
@@ -101,11 +103,15 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
         auto data_vector = msg->body_as_FindCommand()->data();
         auto value_type = msg->body_as_FindCommand()->value_type();
         std::pmr::vector<uint8_t> pattern(data_vector->data(), data_vector->data() + data_vector->size(), &m_pool);
-
         m_log << std::format("[MyHook] Pattern size: {} \n", pattern.size());
-        auto  results = find(pattern, m_pool, Region(reinterpret_cast<uint8_t*>(m_pmrPoolMem), reinterpret_cast<uint8_t*>(m_pmrPoolMem) + allocate_size));
-        uint64_t m_reciver_address = reinterpret_cast<uint64_t>(m_reciver.get_shared_buffer_pointer());
-        uint64_t m_sender_address = reinterpret_cast<uint64_t>(m_sender.get_shared_buffer_pointer());
+
+        std::pmr::vector<Region> exludedRegions(&m_pool);
+        exludedRegions.emplace_back(reinterpret_cast<uint8_t*>(m_pmrPoolMem), reinterpret_cast<uint8_t*>(m_pmrPoolMem) + allocate_size);
+        uint8_t* m_reciver_address = reinterpret_cast<uint8_t*>(m_reciver.get_shared_buffer_pointer());
+        uint8_t* m_sender_address = reinterpret_cast<uint8_t*>(m_sender.get_shared_buffer_pointer());
+        exludedRegions.emplace_back(m_reciver_address, m_reciver_address + m_reciver.get_shared_buffer_size());
+        exludedRegions.emplace_back(m_sender_address, m_sender_address + m_sender.get_shared_buffer_size());
+        auto  results = find(pattern, m_pool, std::move(exludedRegions));
 
         m_log << std::format("[MyHook] Found {} results \n", results.size());
 
@@ -117,10 +123,6 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
             occs_fb.reserve(occs_vec.size());
             for (const auto &o : occs_vec)
             {
-                if (o.baseAddress == m_reciver_address || o.baseAddress == m_sender_address)
-                {
-                    continue;
-                }
                 occs_fb.push_back(
                     Interface::CreateFoundOccurrences(builder, o.baseAddress, o.offset, o.region_size, o.data_size, o.type));
             }
