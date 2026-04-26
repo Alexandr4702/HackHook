@@ -130,5 +130,5 @@ class MessageIPCSender
 };
 
 std::string valueToString(const flatbuffers::Vector<uint8_t> *value, Interface::ValueType type);
-
+std::string valueToString(std::span<const uint8_t> data, Interface::ValueType type);
 #endif // UTILITY_H

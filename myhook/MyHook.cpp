@@ -124,7 +124,7 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
             for (const auto &o : occs_vec)
             {
                 occs_fb.push_back(
-                    Interface::CreateFoundOccurrences(builder, o.baseAddress, o.offset, o.region_size, o.data_size, o.type));
+                    Interface::CreateFoundOccurrences(builder, o.baseAddress, o.offset, o.region_size, o.data_size, value_type));
             }
 
             auto occs_vector = builder.CreateVector(occs_fb);

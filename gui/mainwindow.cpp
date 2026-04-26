@@ -2,9 +2,9 @@
 #include "ui_mainwindow.h"
 #include <atomic>
 #include <thread>
+#include <vector>
 #include <windows.h>
 
-#include "myhook/MemoryScanner.h"
 
 namespace
 {
@@ -126,32 +126,24 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
     case Interface::CommandID_FIND_ACK:
     {
         ui->resultsTable->setRowCount(0);
-        auto occurrences = msg->body_as_FindAck()->occurrences();
-        auto value_type = msg->body_as_FindAck()->value_type();
-        auto value = valueToString(msg->body_as_FindAck()->value(), msg->body_as_FindAck()->value_type());
+        auto* ack = msg->body_as_FindAck();
+        auto value = ack->value();
+        auto occurrences = ack->occurrences();
+        auto value_type = ack->value_type();
+        std::vector<uint8_t> data(value->data(), value->data() + value->size());
 
-        for (auto occurrence : *occurrences)
+        for(auto occur: *occurrences)
         {
             FoundOccurrences found;
-            found.baseAddress = occurrence->base_address();
-            found.offset = occurrence->offset();
-            found.region_size = occurrence->region_size();
-            found.data_size = occurrence->data_size();
-            found.type = occurrence->type();
+            found.baseAddress = occur->base_address();
+            found.offset = occur->offset();
+            found.region_size = occur->region_size();
+            found.data_size = occur->data_size();
+            found.type = occur->type();
 
-            auto table = ui->resultsTable;
-            int row = table->rowCount();
-            table->insertRow(row);
-
-            table->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(value)));
-            table->setItem(row, 1, new QTableWidgetItem("0x" + QString::number(found.baseAddress + found.offset, 16))); // hex
-            table->setItem(row, 2, new QTableWidgetItem("0x" + QString::number(found.baseAddress, 16))); // hex
-            table->setItem(row, 3, new QTableWidgetItem(QString::number(found.offset)));
-            table->setItem(row, 4, new QTableWidgetItem(QString::number(found.region_size)));
-            table->setItem(row, 5, new QTableWidgetItem(QString::number(found.data_size)));
-            table->setItem(row, 6, new QTableWidgetItem(QString::fromStdString(valueTypes[value_type].first)));
-            table->setItem(row, 7, new QTableWidgetItem(""));
+            m_occur_storage.put(data, std::move(found));
         }
+        printOccurences(m_occur_storage);
         break;
     }
     default:
@@ -342,4 +334,32 @@ void MainWindow::on_pressKeyButton_clicked()
     uint64_t hwnd = reinterpret_cast<uint64_t>(m_injector.getHWND());
     m_sender.send_command(Interface::CommandID::CommandID_PRESS_KEY, Interface::Command::Command_PressKeyCommand,
                           Interface::CreatePressKeyCommand, hwnd, 'R');
+}
+
+void MainWindow::printOccurences(const OccurrencesStorage &occurences)
+{
+    auto view = occurences.getFirst();
+
+    auto *table = ui->resultsTable;
+
+    table->setRowCount(static_cast<int>(std::ranges::distance(view)));
+    int row = 0;
+
+    for (const auto &[occur, dataRef] : view)
+    {
+        const auto &data = dataRef.get();
+
+        auto valStr = valueToString(std::span<const uint8_t>(data.data(), data.size()),
+                                    static_cast<Interface::ValueType>(occur.type));
+
+        table->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(valStr)));
+        table->setItem(row, 1, new QTableWidgetItem(QString("0x%1").arg(occur.baseAddress + occur.offset, 0, 16)));
+        table->setItem(row, 2, new QTableWidgetItem(QString("0x%1").arg(occur.baseAddress, 0, 16)));
+        table->setItem(row, 3, new QTableWidgetItem(QString::number(occur.offset)));
+        table->setItem(row, 4, new QTableWidgetItem(QString::number(occur.region_size)));
+        table->setItem(row, 5, new QTableWidgetItem(QString::number(occur.data_size)));
+        table->setItem(row, 6, new QTableWidgetItem(QString::fromStdString(valueTypes[occur.type].first)));
+        table->setItem(row, 7, new QTableWidgetItem{});
+        ++row;
+    }
 }

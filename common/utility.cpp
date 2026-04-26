@@ -32,13 +32,11 @@ void MessageIPCSender::reset()
     m_sharedBufferTx.reset();
 }
 
-std::string valueToString(const flatbuffers::Vector<uint8_t>* value,
+std::string valueToString(std::span<const uint8_t> data,
                           Interface::ValueType type)
 {
     using namespace Interface;
-    if (!value || value->size() == 0) return {};
-
-    std::span<const uint8_t> data(value->data(), value->size());
+    if (data.empty()) return {};
 
     auto to_hex = [&]() -> std::string {
         std::string out;
@@ -48,42 +46,62 @@ std::string valueToString(const flatbuffers::Vector<uint8_t>* value,
         return out;
     };
 
-    switch (type) {
-        case ValueType::ValueType_Int32:
-            if (data.size() >= sizeof(int32_t))
-                return std::format("{}", std::bit_cast<int32_t>(*reinterpret_cast<const int32_t*>(data.data())));
-            break;
-
-        case ValueType::ValueType_Float:
-            if (data.size() >= sizeof(float))
-                return std::format("{}", std::bit_cast<float>(*reinterpret_cast<const float*>(data.data())));
-            break;
-
-        case ValueType::ValueType_Double:
-            if (data.size() >= sizeof(double))
-                return std::format("{}", std::bit_cast<double>(*reinterpret_cast<const double*>(data.data())));
-            break;
-
-        case ValueType::ValueType_Int64:
-            if (data.size() >= sizeof(int64_t))
-                return std::format("{}", std::bit_cast<int64_t>(*reinterpret_cast<const int64_t*>(data.data())));
-            break;
-
-        case ValueType::ValueType_String:
-            return std::string(reinterpret_cast<const char*>(data.data()), data.size());
-
-        case ValueType::ValueType_String16: {
-            if (data.size() % 2 == 0) {
-                std::u16string str16(reinterpret_cast<const char16_t*>(data.data()), data.size() / 2);
-                std::string utf8;
-                utf8.reserve(str16.size());
-                for (char16_t c : str16) utf8 += static_cast<char>(c); // упрощённо
-                return utf8;
-            }
-            break;
+    switch (type)
+    {
+        case ValueType_Int32:
+        {
+            if (data.size() < sizeof(int32_t)) break;
+            int32_t v;
+            std::memcpy(&v, data.data(), sizeof(v));
+            return std::format("{}", v);
         }
 
-        case ValueType::ValueType_ByteArray:
+        case ValueType_Int64:
+        {
+            if (data.size() < sizeof(int64_t)) break;
+            int64_t v;
+            std::memcpy(&v, data.data(), sizeof(v));
+            return std::format("{}", v);
+        }
+
+        case ValueType_Float:
+        {
+            if (data.size() < sizeof(float)) break;
+            float v;
+            std::memcpy(&v, data.data(), sizeof(v));
+            return std::format("{}", v);
+        }
+
+        case ValueType_Double:
+        {
+            if (data.size() < sizeof(double)) break;
+            double v;
+            std::memcpy(&v, data.data(), sizeof(v));
+            return std::format("{}", v);
+        }
+
+        case ValueType_String:
+            return std::string(reinterpret_cast<const char*>(data.data()), data.size());
+
+        case ValueType_String16:
+        {
+            if (data.size() % 2 != 0) break;
+
+            std::u16string str16(
+                reinterpret_cast<const char16_t*>(data.data()),
+                data.size() / 2
+            );
+
+            std::string utf8;
+            utf8.reserve(str16.size());
+
+            for (char16_t c : str16)
+                utf8 += static_cast<char>(c); // всё ещё упрощённо
+
+            return utf8;
+        }
+
+        case ValueType_ByteArray:
             return to_hex();
 
         default:
@@ -91,4 +109,15 @@ std::string valueToString(const flatbuffers::Vector<uint8_t>* value,
     }
 
     return {};
+}
+
+std::string valueToString(const flatbuffers::Vector<uint8_t>* value,
+                          Interface::ValueType type)
+{
+    using namespace Interface;
+    if (!value || value->size() == 0) return {};
+
+    std::span<const uint8_t> data(value->data(), value->size());
+
+    return valueToString(data, type);
 }

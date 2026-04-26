@@ -15,6 +15,10 @@ struct FoundOccurrences
     uint64_t region_size;
     uint64_t data_size;
     int32_t type;
+    auto operator<=>(const FoundOccurrences& b) const noexcept
+    {
+        return (baseAddress + offset) <=> (b.baseAddress + b.offset);
+    }
 };
 
 struct Region
