@@ -4,6 +4,7 @@
 #include "common/common.h"
 #include <algorithm>
 #include <bit>
+#include <cstdint>
 #include <format>
 #include <fstream>
 #include <mutex>
@@ -84,7 +85,7 @@ class MessageIPCSender
     bool send(std::span<const uint8_t> bytes);
 
     template <typename TCreateFn, typename... Args>
-    bool send_command(Interface::CommandID id, Interface::Command type, TCreateFn create_fn, Args &&...args)
+    bool send_command(uint64_t request_id, Interface::CommandID id, Interface::Command type, TCreateFn create_fn, Args &&...args)
     {
         if (!m_sharedBufferTx.is_initialized()) return false;
 
@@ -92,7 +93,7 @@ class MessageIPCSender
 
         auto body = create_fn(m_builder, std::forward<Args>(args)...);
 
-        auto envelope = Interface::CreateCommandEnvelope(m_builder, id, type, body.Union());
+        auto envelope = Interface::CreateCommandEnvelope(m_builder, id, request_id, type, body.Union());
         m_builder.Finish(envelope);
 
         auto buf_ptr = m_builder.GetBufferPointer();

@@ -87,14 +87,14 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
         break;
     case Interface::CommandID_READ:
         m_log << std::format("[MyHook] Received read command with offset: {}\n", msg->body_as_ReadCommand()->offset());
+        msg->body_as_ReadCommand()->size();
         break;
     case Interface::CommandID_DUMP: {
         m_log << "[MyHook] Received CommandID_DUMP command \n";
         std::string dump_location = g_params.logDumpLocation + "dump_" + Logger::GetTimestamp() + "\\";
         CreateDirectory(dump_location.c_str(), nullptr);
         MemRead(dump_location, m_log);
-        m_sender.send_command(Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE,
-                              Interface::CreateEmptyCommand);
+        m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
         break;
     }
     case Interface::CommandID_FIND: {
@@ -132,8 +132,7 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
 
             return CreateFindAck(builder, value_vector, value_type, occs_vector);
         };
-
-        m_sender.send_command(Interface::CommandID::CommandID_FIND_ACK, Interface::Command::Command_FindAck, createFindAck, pattern, value_type, results);
+        m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_FIND_ACK, Interface::Command::Command_FindAck, createFindAck, pattern, value_type, results);
 
         break;
     }
@@ -141,8 +140,7 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
         const HWND hwnd = reinterpret_cast<HWND>(msg->body_as_PressKeyCommand()->hwnd());
         const char key = msg->body_as_PressKeyCommand()->key();
         SendKeyToWindow(hwnd, key);
-        m_sender.send_command(Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE,
-                              Interface::CreateEmptyCommand);
+        m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
         break;
     }
     default:

@@ -5,6 +5,9 @@
 #include "common/utility.h"
 #include "myhook/MemoryScanner.h"
 #include "injector/Injector.h"
+#include <atomic>
+#include <cstdint>
+#include <mutex>
 #include <unordered_map>
 #include <utility>
 #include <QMainWindow>
@@ -154,6 +157,58 @@ class MainWindow : public QMainWindow
         std::multiset<SortedItem, CompareItem> viewSortedItems;
     };
 
+    class RpcClient
+    {
+        public:
+        RpcClient(MessageIPCSender& sender): m_sender(sender)
+        {
+
+        }
+
+        template <typename TCreateFn, typename... Args>
+        bool send_rpc(Interface::CommandID id, Interface::Command type, TCreateFn create_fn,
+                      Args &&...args)
+        {
+            return m_sender.send_command(m_cnt.fetch_add(1, std::memory_order_relaxed), id, type, create_fn, std::forward<Args>(args)...);
+        }
+        template <typename TCreateFn, typename... Args>
+        bool send_rpc_cb(std::function<void(void)> cb, Interface::CommandID id, Interface::Command type,
+                         TCreateFn create_fn, Args &&...args)
+        {
+            auto cnt = m_cnt.fetch_add(1, std::memory_order_relaxed);
+            {
+                std::scoped_lock lck(m_mtx);
+                m_callbacks[cnt] = std::move(cb);
+            }
+            if (!m_sender.send_command(cnt, id, type, create_fn, std::forward<Args>(args)...))
+            {
+                std::scoped_lock lck(m_mtx);
+                m_callbacks.erase(cnt);
+                return false;
+            }
+            return true;
+        }
+        void call_cb(uint64_t request_id)
+        {
+            decltype(m_callbacks)::mapped_type cb;
+            {
+                std::scoped_lock lck(m_mtx);
+                auto it = m_callbacks.find(request_id);
+                if(it == m_callbacks.end())
+                    return;
+                cb = std::move(it->second);
+                m_callbacks.erase(it);
+            }
+            if (cb) cb();
+        }
+        private:
+        MessageIPCSender &m_sender;
+        std::atomic_uint64_t m_cnt = 0;
+        std::mutex m_mtx;
+        std::unordered_map<uint64_t, std::function<void(void)>> m_callbacks;
+    };
+
+    RpcClient m_rpc_client;
     OccurrencesStorage m_occur_storage;
     bool m_hooked = false;
     std::mutex m_hook_mutex;

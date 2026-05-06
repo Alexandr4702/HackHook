@@ -1,6 +1,8 @@
 #include "mainwindow.h"
+#include "interface_generated.h"
 #include "ui_mainwindow.h"
 #include <atomic>
+#include <cstdint>
 #include <thread>
 #include <vector>
 #include <windows.h>
@@ -18,10 +20,74 @@ namespace
         {"String16",  Interface::ValueType_String16},
         {"ByteArray", Interface::ValueType_ByteArray}
     }};
-}
+
+    std::vector<uint8_t> string2data(const QString &text, int value_type)
+    {
+        using namespace Interface;
+
+        std::vector<uint8_t> data;
+        bool ok = true;
+
+        switch (value_type)
+        {
+        case ValueType::ValueType_Int32: {
+            int32_t val = text.toInt(&ok);
+            uint8_t *p = reinterpret_cast<uint8_t *>(&val);
+            data.assign(p, p + sizeof(val));
+            break;
+        }
+        case ValueType::ValueType_Float: {
+            float val = text.toFloat(&ok);
+            uint8_t *p = reinterpret_cast<uint8_t *>(&val);
+            data.assign(p, p + sizeof(val));
+            break;
+        }
+        case ValueType::ValueType_Double: {
+            double val = text.toDouble(&ok);
+            uint8_t *p = reinterpret_cast<uint8_t *>(&val);
+            data.assign(p, p + sizeof(val));
+            break;
+        }
+        case ValueType::ValueType_Int64: {
+            qint64 val = text.toLongLong(&ok);
+            uint8_t *p = reinterpret_cast<uint8_t *>(&val);
+            data.assign(p, p + sizeof(val));
+            break;
+        }
+        case ValueType::ValueType_String: {
+            QByteArray val = text.toUtf8();
+            data.assign(val.begin(), val.end());
+            break;
+        }
+        case ValueType::ValueType_String16: {
+            auto str = text.toStdU16String();
+            uint8_t *p = reinterpret_cast<uint8_t *>(str.data());
+            data.assign(p, p + str.size() * sizeof(char16_t));
+            break;
+        }
+        case ValueType::ValueType_ByteArray: {
+            std::string hex = text.toStdString();
+
+            if (hex.size() % 2 != 0)
+            {
+                hex = "0" + hex;
+            }
+            for (size_t i = 0; i < hex.size(); i += 2)
+            {
+                uint8_t byte = static_cast<uint8_t>(std::stoul(hex.substr(i, 2), nullptr, 16));
+                data.push_back(byte);
+            }
+            break;
+        }
+        default:
+            break;
+        }
+        return data;
+    }
+} // namespace
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), ui(new Ui::MainWindow)
+    : QMainWindow(parent), ui(new Ui::MainWindow), m_rpc_client(m_sender)
 {
     m_sender.init(BUFFER_NAME_TX, true);
     m_reciver.init(BUFFER_NAME_RX, BUFFER_CAPACITY, true);
@@ -122,6 +188,9 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
         break;
     case Interface::CommandID_ACK:
         qDebug() << "[HandleMessage] Received CommandID_ACK command";
+        break;
+    case Interface::CommandID_READ_ACK:
+        qDebug() << "[HandleMessage] Received CommandID_READ_ACK command";
         break;
     case Interface::CommandID_FIND_ACK:
     {
@@ -224,7 +293,7 @@ void MainWindow::on_dumpButton_clicked()
     qDebug() << "Dump button clicked";
     using namespace Interface;
 
-    m_sender.send_command(Interface::CommandID::CommandID_DUMP, Interface::Command::Command_NONE, CreateEmptyCommand);
+    m_rpc_client.send_rpc(Interface::CommandID::CommandID_DUMP, Interface::Command::Command_NONE, CreateEmptyCommand);
 }
 
 void MainWindow::on_firstScanButton_clicked()
@@ -234,75 +303,15 @@ void MainWindow::on_firstScanButton_clicked()
     {
         return;
     }
-    // ui->valueTypeCombo->currentData().toInt();
-    std::vector<uint8_t> data;
+
     auto value_type = ui->valueTypeCombo->currentData().toInt();
-    bool ok = true;
+    const auto &text = ui->valueEdit->text();
+    std::vector<uint8_t> data = string2data(text, value_type);
 
-    switch (value_type)
-    {
-    case ValueType::ValueType_Int32: {
-        int32_t val = ui->valueEdit->text().toInt(&ok);
-        uint8_t *p = reinterpret_cast<uint8_t *>(&val);
-        data.assign(p, p + sizeof(val));
-        break;
-    }
-    case ValueType::ValueType_Float: {
-        float val = ui->valueEdit->text().toFloat(&ok);
-        uint8_t *p = reinterpret_cast<uint8_t *>(&val);
-        data.assign(p, p + sizeof(val));
-        break;
-    }
-    case ValueType::ValueType_Double: {
-        double val = ui->valueEdit->text().toDouble(&ok);
-        uint8_t *p = reinterpret_cast<uint8_t *>(&val);
-        data.assign(p, p + sizeof(val));
-        break;
-    }
-    case ValueType::ValueType_Int64: {
-        qint64 val = ui->valueEdit->text().toLongLong(&ok);
-        uint8_t *p = reinterpret_cast<uint8_t *>(&val);
-        data.assign(p, p + sizeof(val));
-        break;
-    }
-    case ValueType::ValueType_String: {
-        QByteArray val = ui->valueEdit->text().toUtf8();
-        data.assign(val.begin(), val.end());
-        break;
-    }
-    case ValueType::ValueType_String16: {
-        auto str = ui->valueEdit->text().toStdU16String();
-        uint8_t *p = reinterpret_cast<uint8_t *>(str.data());
-        data.assign(p, p + str.size() * sizeof(char16_t));
-        break;
-    }
-    case ValueType::ValueType_ByteArray: {
-        std::string hex = ui->valueEdit->text().toStdString();
-
-        if (hex.size() % 2 != 0)
-        {
-            hex = "0" + hex;
-        }
-        for (size_t i = 0; i < hex.size(); i += 2)
-        {
-            uint8_t byte = static_cast<uint8_t>(std::stoul(hex.substr(i, 2), nullptr, 16));
-            data.push_back(byte);
-        }
-        break;
-    }
-    default:
-        break;
-    }
     qDebug() << data;
-    if(!ok)
-    {
-        qDebug() << "Failed to parse value";
-        return;
-    }
-    // ui->valueEdit->text();
-
     if (data.size() == 0)
     {
+        qDebug() << "Failed to parse value";
         return;
     }
 
@@ -311,8 +320,8 @@ void MainWindow::on_firstScanButton_clicked()
         return Interface::CreateFindCommand(builder, type, vec);
     };
 
-    m_sender.send_command(Interface::CommandID::CommandID_FIND, Interface::Command::Command_FindCommand, create_find_cmd, static_cast<Interface::ValueType> (value_type), data);
-    qDebug() << "on_firstScan_clicked " << ui->valueTypeCombo->currentData().toInt() << " " << ui->valueEdit->text();
+    m_rpc_client.send_rpc(Interface::CommandID::CommandID_FIND, Interface::Command::Command_FindCommand, create_find_cmd, static_cast<Interface::ValueType> (value_type), data);
+    qDebug() << "on_firstScan_clicked " << ui->valueTypeCombo->currentData().toInt() << " " << text;
 }
 
 void MainWindow::on_nextScanButton_clicked()
@@ -320,6 +329,21 @@ void MainWindow::on_nextScanButton_clicked()
     if (!m_injector.isHooked())
     {
         return;
+    }
+    auto value_type = ui->valueTypeCombo->currentData().toInt();
+    const auto &text = ui->valueEdit->text();
+    std::vector<uint8_t> data = string2data(text, value_type);
+    auto view = m_occur_storage.getFirst();
+
+    for(const auto&[occur, dataRef] : view)
+    {
+        const auto &data_el = dataRef.get();
+        qDebug() << occur.baseAddress;
+        occur.offset;
+        if (data == data_el)
+        {
+
+        }
     }
 
     qDebug() << "on_nextScan_clicked";
@@ -332,7 +356,7 @@ void MainWindow::on_pressKeyButton_clicked()
         return;
     }
     uint64_t hwnd = reinterpret_cast<uint64_t>(m_injector.getHWND());
-    m_sender.send_command(Interface::CommandID::CommandID_PRESS_KEY, Interface::Command::Command_PressKeyCommand,
+    m_rpc_client.send_rpc(Interface::CommandID::CommandID_PRESS_KEY, Interface::Command::Command_PressKeyCommand,
                           Interface::CreatePressKeyCommand, hwnd, 'R');
 }
 

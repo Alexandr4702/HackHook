@@ -38,7 +38,7 @@ table ReadCommand {
 
 table ReadAck {
   offset: ulong;
-  size: ulong;
+  data: [ubyte];
 }
 
 table FindCommand {
@@ -93,7 +93,8 @@ union Command {
 }
 
 table CommandEnvelope {
-  id: CommandID; 
+  id: CommandID;
+  request_id: ulong;
   body: Command;
 }
 
