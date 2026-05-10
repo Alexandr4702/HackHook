@@ -5,6 +5,10 @@ project(SetWindowsHookExInjection)
 # set(CMAKE_GENERATOR_PLATFORM x64)
 set(CMAKE_CXX_STANDARD 23)
 
+add_compile_options(
+    -fmacro-prefix-map=${CMAKE_SOURCE_DIR}/=.
+)
+
 find_package(Boost CONFIG REQUIRED)
 
 add_library(common STATIC common/utility.cpp common/SharedBuffer.cpp)

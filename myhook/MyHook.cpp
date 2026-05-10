@@ -35,7 +35,7 @@ MyHook::MyHook(): allocate_size(128 * 1024 * 1024), m_pmrPoolMem(VirtualAlloc(nu
 
 MyHook::~MyHook()
 {
-    m_log << "[MyHook] Destroyed\n";
+    LOG(m_log, "MyHook Destroyed");
 
     m_pool.release();
     m_monotonicPool.release();
@@ -61,7 +61,7 @@ void MyHook::start()
 void MyHook::stop()
 {
     m_running.store(false, std::memory_order_release);
-    m_log << "[MyHook] Stopped\n";
+    LOG(m_log, "MyHook Stopped");
 }
 
 DWORD WINAPI MyHook::ThreadWrapperCreator(LPVOID param)
@@ -82,28 +82,28 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
     switch (msg->id())
     {
     case Interface::CommandID_WRITE:
-        m_log << std::format("[MyHook] Received write command with offset: {}\n", msg->body_as_WriteCommand()->offset());
+        LOG(m_log, std::format("Received write command with offset: {}", msg->body_as_WriteCommand()->offset()));
 
         break;
     case Interface::CommandID_READ:
-        m_log << std::format("[MyHook] Received read command with offset: {}\n", msg->body_as_ReadCommand()->offset());
+        LOG(m_log, std::format("Received read command with offset: {}", msg->body_as_ReadCommand()->offset()));
         msg->body_as_ReadCommand()->size();
         break;
     case Interface::CommandID_DUMP: {
-        m_log << "[MyHook] Received CommandID_DUMP command \n";
+        LOG(m_log, "Received CommandID_DUMP command");
         std::string dump_location = g_params.logDumpLocation + "dump_" + Logger::GetTimestamp() + "\\";
         CreateDirectory(dump_location.c_str(), nullptr);
-        MemRead(dump_location, m_log);
+        MemRead(dump_location);
         m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
         break;
     }
     case Interface::CommandID_FIND: {
-        m_log << "[MyHook] Received CommandID_FIND command \n";
+        LOG(m_log, "Received CommandID_FIND command");
 
         auto data_vector = msg->body_as_FindCommand()->data();
         auto value_type = msg->body_as_FindCommand()->value_type();
         std::pmr::vector<uint8_t> pattern(data_vector->data(), data_vector->data() + data_vector->size(), &m_pool);
-        m_log << std::format("[MyHook] Pattern size: {} \n", pattern.size());
+        LOG(m_log, std::format("Pattern size: {}", pattern.size()));
 
         std::pmr::vector<Region> exludedRegions(&m_pool);
         exludedRegions.emplace_back(reinterpret_cast<uint8_t*>(m_pmrPoolMem), reinterpret_cast<uint8_t*>(m_pmrPoolMem) + allocate_size);
@@ -113,7 +113,7 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
         exludedRegions.emplace_back(m_sender_address, m_sender_address + m_sender.get_shared_buffer_size());
         auto  results = find(pattern, m_pool, std::move(exludedRegions));
 
-        m_log << std::format("[MyHook] Found {} results \n", results.size());
+        LOG(m_log, std::format("[MyHook] Found {} results", results.size()));
 
         auto createFindAck = [this, m_reciver_address, m_sender_address](flatbuffers::FlatBufferBuilder &builder, const auto& value_data,
                                 Interface::ValueType value_type,
@@ -161,21 +161,19 @@ DWORD MyHook::ThreadsCreator()
     return 0;
 }
 
-
 void SendKeyToWindow(HWND hWnd, char key)
 {
     if (!hWnd || !IsWindow(hWnd))
     {
-        MyHook::getInstance().m_log << "[ERROR] Invalid window handle\n";
+        LOG(MyHook::getInstance().m_log, "Invalid window handle");
         return;
     }
 
     PostMessage(hWnd, WM_KEYDOWN, key, 0x00000001);
     Sleep(10);
     PostMessage(hWnd, WM_KEYUP, key, 0xC0000001);
-    MyHook::getInstance().m_log << std::format("[KEY] Sent key '{}' to window\n", key);
+    LOG(MyHook::getInstance().m_log, std::format("Sent key '{}' to window", key));
 }
-
 
 void print(std::span<const uint8_t> bytes, std::stringstream &out)
 {

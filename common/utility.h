@@ -13,68 +13,81 @@
 
 #include "SharedBuffer.h"
 
+
 class Logger
 {
     std::ofstream file;
     mutable std::mutex log_mutex;
 
-  public:
-    Logger()
-    {
-    }
+public:
+    Logger() = default;
 
     ~Logger()
     {
-        std::lock_guard<std::mutex> lock(log_mutex);
+        std::scoped_lock lock(log_mutex);
         if (file.is_open())
-        {
             file.close();
-        }
     }
 
-    void init(const std::string &filename)
+    void init(const std::string& filename)
     {
-        std::lock_guard<std::mutex> lock(log_mutex);
+        std::scoped_lock lock(log_mutex);
+        if (file.is_open())
+            return;
+
         file.open(filename, std::ios::out | std::ios::app);
     }
 
-    template <typename T> Logger &operator<<(T &&value)
+    template <typename T>
+    Logger& operator<<(T&& value)
     {
-        log_impl(std::forward<T>(value));
+        std::scoped_lock lock(log_mutex);
+
+        if (!file.is_open())
+            return *this;
+
+        file << "[" << GetTimestamp() << "] "
+             << std::forward<T>(value);
+
         return *this;
     }
 
-    Logger &operator<<(std::ostream &(*manip)(std::ostream &))
+    Logger& operator<<(std::ostream& (*manip)(std::ostream&))
     {
-        log_impl(manip);
+        std::scoped_lock lock(log_mutex);
+
+        if (!file.is_open())
+            return *this;
+
+        file << manip;
         return *this;
     }
-
     static std::string GetTimestamp()
     {
-        SYSTEMTIME st;
-        GetLocalTime(&st);
-        char buffer[64];
-        sprintf_s(buffer, "%04d-%02d-%02d_%02d-%02d-%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute,
-                  st.wSecond);
-        return buffer;
-    }
+        using namespace std::chrono;
 
-  private:
-    template <typename T> void log_impl(T &&value)
-    {
-        std::lock_guard<std::mutex> lock(log_mutex);
-        if (file.is_open())
-        {
-            file << "[" << GetTimestamp() << "] ";
-            file << std::forward<T>(value);
-            file.flush();
-        }
-    }
+        auto now = system_clock::now();
+        auto t = system_clock::to_time_t(now);
 
-    Logger(const Logger &) = delete;
-    Logger &operator=(const Logger &) = delete;
+        std::tm tm;
+        localtime_s(&tm, &t);
+
+        return std::format("{:04}-{:02}-{:02}_{:02}-{:02}-{:02}",
+                           tm.tm_year + 1900,
+                           tm.tm_mon + 1,
+                           tm.tm_mday,
+                           tm.tm_hour,
+                           tm.tm_min,
+                           tm.tm_sec);
+    }
+private:
+
+    Logger(const Logger&) = delete;
+    Logger& operator=(const Logger&) = delete;
 };
+
+#define LOG(logger, msg) \
+    (logger) << std::format("[{}: {} ] {} \n", __FILE__, __LINE__, msg)
 
 class MessageIPCSender
 {

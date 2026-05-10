@@ -1,4 +1,5 @@
 #include "MemDumper.h"
+#include "MyHook.h"
 
 #include <fstream>
 #include <sstream>
@@ -426,7 +427,7 @@ class HeapAnalyzer
     }
 };
 
-void MemRead(std::string out_location, Logger& log)
+void MemRead(std::string out_location)
 {
     auto threadInfos = GetAllThreadInfo(GetCurrentProcessId());
     std::ofstream outFile(out_location + "threads_dump.csv");
@@ -437,25 +438,27 @@ void MemRead(std::string out_location, Logger& log)
         threadInfo.ClientId.UniqueProcess << "," << threadInfo.ClientId.UniqueThread << "," <<
         threadInfo.AffinityMask << "," << threadInfo.Priority << "," << threadInfo.BasePriority << "\n";
     }
-    log << "MemReadThread started \n";
+
+    LOG(MyHook::getInstance().m_log, "MemReadThread started");
     auto sections = dumpWithMapping(out_location + "mem_dump.bin", GetCurrentProcess());
     DumpMemoryMapToCSV(out_location + "mem_map.csv", sections);
-    log << "DumpMemoryMapToCSV finished \n";
-
+    LOG(MyHook::getInstance().m_log, "DumpMemoryMapToCSV finished");
     std::ofstream csvFile(out_location + "heap_analysis.csv");
+
     if (csvFile)
     {
         HeapAnalyzer analyzer(csvFile);
         analyzer.Analyze();
         csvFile.close();
-        log << "Heap data saved to heap_analysis.csv\n";
+
+        LOG(MyHook::getInstance().m_log, "Heap data saved to heap_analysis.csv");
     }
     else
     {
-        log << "Error: Cannot open CSV file!\n";
+        LOG(MyHook::getInstance().m_log, "Error: Cannot open CSV file!");
     }
 
-    log << "MemReadThread finished \n ";
+    LOG(MyHook::getInstance().m_log, "MemReadThread finished");
     return;
 }
 

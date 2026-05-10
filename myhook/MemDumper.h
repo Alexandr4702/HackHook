@@ -53,6 +53,6 @@ struct SectionInfo
     std::string sectionName;
 };
 
-void MemRead(std::string out_location, Logger& log);
+void MemRead(std::string out_location);
 
 #endif // MEM_DUMPER_CPP_
