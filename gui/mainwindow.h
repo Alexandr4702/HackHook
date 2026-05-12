@@ -41,6 +41,7 @@ class MainWindow : public QMainWindow
     void on_firstScanButton_clicked();
     void on_nextScanButton_clicked();
     void on_pressKeyButton_clicked();
+    void on_clearButton_clicked();
 
   private:
     class OccurrencesStorage;
@@ -120,6 +121,12 @@ class MainWindow : public QMainWindow
 
             if (it->second.empty())
                 s.erase(it);
+        }
+
+        void clear()
+        {
+            s.clear();
+            viewSortedItems.clear();
         }
 
         auto getFirst() const

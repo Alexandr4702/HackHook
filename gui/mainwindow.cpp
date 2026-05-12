@@ -360,6 +360,12 @@ void MainWindow::on_pressKeyButton_clicked()
                           Interface::CreatePressKeyCommand, hwnd, 'R');
 }
 
+void MainWindow::on_clearButton_clicked()
+{
+    m_occur_storage.clear();
+    printOccurences(m_occur_storage);
+}
+
 void MainWindow::printOccurences(const OccurrencesStorage &occurences)
 {
     auto view = occurences.getFirst();
