@@ -194,13 +194,12 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
         break;
     case Interface::CommandID_FIND_ACK:
     {
-        ui->resultsTable->setRowCount(0);
         auto* ack = msg->body_as_FindAck();
         auto value = ack->value();
         auto occurrences = ack->occurrences();
         auto value_type = ack->value_type();
         std::vector<uint8_t> data(value->data(), value->data() + value->size());
-
+        qDebug() << std::format(L"CommandID_FIND_ACK recived found {} occurrences ", occurrences->size());
         for(auto occur: *occurrences)
         {
             FoundOccurrences found;
