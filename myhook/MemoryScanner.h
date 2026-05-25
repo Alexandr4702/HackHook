@@ -6,6 +6,8 @@
 #include <span>
 #include <functional>
 #include <memory_resource>
+#include <processthreadsapi.h>
+
 #include "MyHookImport.h"
 
 struct FoundOccurrences
@@ -36,5 +38,47 @@ struct Region
     }
 };
 
-std::pmr::vector<FoundOccurrences> find(std::span<const uint8_t> pattern, std::pmr::synchronized_pool_resource& pool, std::pmr::vector<Region>&& exludeReg);
+class MemTool
+{
+  public:
+    MemTool();
+    ~MemTool();
+    static MemTool& instance()
+    {
+        static MemTool instance;
+        return instance;
+    }
+    MemTool(const MemTool &) = delete;
+    MemTool &operator=(const MemTool &) = delete;
+    MemTool(MemTool &&) = delete;
+    MemTool &operator=(MemTool &&) = delete;
+
+    size_t read(uintptr_t address, void* out, size_t size);
+    bool write(uintptr_t address, const void *data, size_t size);
+    std::pmr::vector<FoundOccurrences> find(std::span<const uint8_t> pattern,
+                                            std::pmr::synchronized_pool_resource &pool,
+                                            std::pmr::vector<Region> &&exludeReg);
+
+  private:
+    class ProtectGuard
+    {
+        void *addr;
+        size_t size;
+        DWORD old;
+
+      public:
+        ProtectGuard(void *a, size_t s) : addr(a), size(s)
+        {
+            VirtualProtect(addr, size, PAGE_EXECUTE_READWRITE, &old);
+        }
+
+        ~ProtectGuard()
+        {
+            DWORD tmp;
+            VirtualProtect(addr, size, old, &tmp);
+        }
+    };
+    PVOID m_veHandle = nullptr;
+};
+
 #endif // BOYERMOOREHORSPOOL_H

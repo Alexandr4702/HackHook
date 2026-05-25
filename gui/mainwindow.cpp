@@ -1,8 +1,13 @@
 #include "mainwindow.h"
 #include "interface_generated.h"
+#include "myhook/MemoryScanner.h"
 #include "ui_mainwindow.h"
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <memory>
+#include <mutex>
+#include <qlogging.h>
 #include <thread>
 #include <vector>
 #include <windows.h>
@@ -191,6 +196,7 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
         break;
     case Interface::CommandID_READ_ACK:
         qDebug() << "[HandleMessage] Received CommandID_READ_ACK command";
+        m_rpc_client.call_cb(msg);
         break;
     case Interface::CommandID_FIND_ACK:
     {
@@ -325,26 +331,60 @@ void MainWindow::on_firstScanButton_clicked()
 
 void MainWindow::on_nextScanButton_clicked()
 {
-    if (!m_injector.isHooked())
+    if (!m_injector.isHooked() || m_pending.load(std::memory_order::acquire) != 0)
     {
+        qDebug() << "Injector is not hooked  or " << "prevous search is not finished: " << m_pending.load();
         return;
     }
+    auto view = m_occur_storage.getFirst();
+    const auto view_size = std::ranges::distance(view);
+    if(view_size == 0)
+        return;
+
+    m_pending.store(view_size, std::memory_order::release);
+
     auto value_type = ui->valueTypeCombo->currentData().toInt();
     const auto &text = ui->valueEdit->text();
-    std::vector<uint8_t> data = string2data(text, value_type);
-    auto view = m_occur_storage.getFirst();
+    auto pattern_bytes = std::make_shared<std::vector<uint8_t>>(string2data(text, value_type));
 
-    for(const auto&[occur, dataRef] : view)
-    {
-        const auto &data_el = dataRef.get();
-        qDebug() << occur.baseAddress;
-        occur.offset;
-        if (data == data_el)
+    auto erase_print = [this]() {
+        qDebug() << "invokeMethod called";
+        std::scoped_lock lck(m_to_remove_mtx);
+        for (auto &[el, occ] : to_remove)
         {
-
+            m_occur_storage.erase(el, occ);
         }
-    }
+        to_remove.clear();
+        printOccurences(m_occur_storage);
+    };
+    for (const auto &[occur, dataRef] : view)
+    {
+        if (pattern_bytes->size() > dataRef.get().size())
+        {
+            std::scoped_lock lck(m_to_remove_mtx);
+            to_remove.emplace_back(dataRef, occur);
+            if (m_pending.fetch_sub(1, std::memory_order::acq_rel) == 1)
+                QMetaObject::invokeMethod(this, erase_print, Qt::QueuedConnection);
+            continue;
+        }
+        const auto data_el = dataRef.get();
+        auto cb = [this, pattern_bytes, data_el, occur,
+                   erase_print](const Interface::CommandEnvelope *msg) {
+            auto read_ack = msg->body_as_ReadAck();
+            auto data = read_ack->data();
 
+            if (!data || !std::equal(pattern_bytes->begin(), pattern_bytes->end(), data->begin()))
+            {
+                std::scoped_lock lck(m_to_remove_mtx);
+                to_remove.emplace_back(data_el, occur);
+            }
+            qDebug() << "Cb is called";
+            if (m_pending.fetch_sub(1, std::memory_order::acq_rel) == 1)
+                QMetaObject::invokeMethod(this, erase_print, Qt::QueuedConnection);
+        };
+        m_rpc_client.send_rpc_cb(cb, Interface::CommandID::CommandID_READ, Interface::Command::Command_ReadCommand,
+                                 Interface::CreateReadCommand, occur.baseAddress + occur.offset, pattern_bytes->size());
+    }
     qDebug() << "on_nextScan_clicked";
 }
 

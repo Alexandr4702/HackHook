@@ -1,4 +1,3 @@
-#include "MemoryScanner.h"
 #include "BMH_SIMD.h"
 #include "MyHook.h"
 
@@ -16,8 +15,8 @@
 #include <setjmp.h>
 #include <psapi.h>
 
-#include <processthreadsapi.h>
-
+namespace
+{
 // Jmp point for veh fail
 thread_local jmp_buf g_jump;
 
@@ -40,10 +39,8 @@ std::vector<MEMORY_BASIC_INFORMATION> enum_regions()
 Region GetMyDllRegion()
 {
     HMODULE hModule = nullptr;
-    if (!GetModuleHandleEx(
-            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-            reinterpret_cast<LPCSTR>(&GetMyDllRegion),
-            &hModule))
+    if (!GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCSTR>(&GetMyDllRegion), &hModule))
     {
         return {nullptr, nullptr};
     }
@@ -55,8 +52,8 @@ Region GetMyDllRegion()
     }
 
     Region r;
-    r.start = reinterpret_cast<uint8_t*>(mi.lpBaseOfDll);
-    r.end   = r.start + mi.SizeOfImage;
+    r.start = reinterpret_cast<uint8_t *>(mi.lpBaseOfDll);
+    r.end = r.start + mi.SizeOfImage;
     return r;
 }
 
@@ -79,12 +76,14 @@ Region GetCurrentThreadStackRegion()
     currentThreadStack.end   = std::max(reinterpret_cast<uint8_t*>(teb->StackLimit), reinterpret_cast<uint8_t*>(teb->StackBase));
     return currentThreadStack;
 }
+} // namespace
 
-std::pmr::vector<FoundOccurrences> find(std::span<const uint8_t> pattern, std::pmr::synchronized_pool_resource& pool, std::pmr::vector<Region>&& exludeReg)
+std::pmr::vector<FoundOccurrences> MemTool::find(std::span<const uint8_t> pattern, std::pmr::synchronized_pool_resource& pool, std::pmr::vector<Region>&& exludeReg)
 {
     std::pmr::vector<FoundOccurrences> result(&pool);
     std::vector<MEMORY_BASIC_INFORMATION> regions = enum_regions();
     std::vector<Region> excludedRegions;
+    
 
     excludedRegions.push_back(GetCurrentThreadStackRegion());
     excludedRegions.push_back(GetMyDllRegion());
@@ -99,22 +98,20 @@ std::pmr::vector<FoundOccurrences> find(std::span<const uint8_t> pattern, std::p
     auto number_of_threads = std::max(1u, std::thread::hardware_concurrency());
     std::vector<std::thread> thread_pool;
     std::vector<std::vector<FoundOccurrences>> results(number_of_threads);
-    std::mutex mtx;
     std::atomic_size_t regions_cnt = 0;
     std::latch waitForAddingStacks(number_of_threads);
     std::counting_semaphore<1024> startThreads(0);
 
+    std::vector<Region> thread_stack_region(number_of_threads);
+
     const std::boyer_moore_horspool_searcher<const uint8_t *> searcher(pattern.data(), pattern.data() + pattern.size());
     const SimdBmhAvx2Searcher searcher_Avx2(pattern.data(), pattern.size());
 
-    PVOID veh_handle = AddVectoredExceptionHandler(1, veh_handler);
 
-    auto worker = [&regions, &mtx, &searcher, &searcher_Avx2, &pattern, &results, &excludedRegions,
-                   &waitForAddingStacks, &startThreads, &regions_cnt](int threadId) {
-        {
-            std::unique_lock lck(mtx);
-            excludedRegions.push_back(GetCurrentThreadStackRegion());
-        }
+    auto worker = [&regions, &searcher, &searcher_Avx2, &pattern, &results, &excludedRegions,
+                   &waitForAddingStacks, &startThreads, &regions_cnt, &thread_stack_region](int threadId) {
+
+        thread_stack_region[threadId] = GetCurrentThreadStackRegion();
         waitForAddingStacks.count_down();
         startThreads.acquire();
 
@@ -155,8 +152,8 @@ std::pmr::vector<FoundOccurrences> find(std::span<const uint8_t> pattern, std::p
     {
         thread_pool.push_back(std::thread(worker, threadId));
     }
-
     waitForAddingStacks.wait();
+    excludedRegions.insert(excludedRegions.end(), thread_stack_region.begin(), thread_stack_region.end());
 
     std::erase_if(regions, [&excludedRegions](MEMORY_BASIC_INFORMATION &region) {
         if (region.State != MEM_COMMIT)
@@ -195,6 +192,102 @@ std::pmr::vector<FoundOccurrences> find(std::span<const uint8_t> pattern, std::p
                       std::make_move_iterator(results[threadId].end()));
     }
 
-    RemoveVectoredExceptionHandler(veh_handle);
     return result;
+}
+
+size_t MemTool::read(uintptr_t address, void* out, size_t size)
+{
+    if (!out || size == 0)
+        return 0;
+
+    auto* src = reinterpret_cast<const std::byte*>(address);
+    auto* dst = reinterpret_cast<std::byte*>(out);
+
+    size_t totalRead = 0;
+
+    while (totalRead < size)
+    {
+        MEMORY_BASIC_INFORMATION mbi{};
+
+        if (VirtualQuery(src, &mbi, sizeof(mbi)) != sizeof(mbi))
+            break;
+
+        if (mbi.State != MEM_COMMIT)
+            break;
+
+        const DWORD protect = mbi.Protect & 0xff;
+
+        constexpr DWORD readable =
+            PAGE_READONLY |
+            PAGE_READWRITE |
+            PAGE_WRITECOPY |
+            PAGE_EXECUTE_READ |
+            PAGE_EXECUTE_READWRITE |
+            PAGE_EXECUTE_WRITECOPY;
+
+        if ((protect & readable) == 0)
+            break;
+
+        if (protect & (PAGE_GUARD | PAGE_NOACCESS))
+            break;
+
+        const auto regionEnd =
+            reinterpret_cast<uintptr_t>(mbi.BaseAddress) +
+            mbi.RegionSize;
+
+        const size_t chunk =
+            std::min(
+                size - totalRead,
+                regionEnd - reinterpret_cast<uintptr_t>(src));
+
+        if (setjmp(g_jump) != 0)
+            break;
+
+        std::memcpy(dst, src, chunk);
+
+        totalRead += chunk;
+        src += chunk;
+        dst += chunk;
+    }
+
+    return totalRead;
+}
+
+bool MemTool::write(uintptr_t address, const void* data, size_t size)
+{
+    MEMORY_BASIC_INFORMATION mbi;
+
+    if (VirtualQuery(reinterpret_cast<void*>(address), &mbi, sizeof(mbi)) != sizeof(mbi))
+        return false;
+
+    if (mbi.State != MEM_COMMIT)
+        return false;
+
+    const bool writable =
+        (mbi.Protect & (PAGE_READWRITE |
+                        PAGE_EXECUTE_READWRITE |
+                        PAGE_WRITECOPY)) &&
+        !(mbi.Protect & PAGE_GUARD);
+
+    if (!writable)
+        return false;
+
+    if (setjmp(g_jump) != 0)
+    {
+        return false;
+    }
+    ProtectGuard g((void*)address, size);
+    std::memcpy(reinterpret_cast<void*>(address), data, size);
+    return true;
+}
+
+MemTool::MemTool()
+{
+    m_veHandle = AddVectoredExceptionHandler(1, veh_handler);
+}
+
+MemTool::~MemTool()
+{
+    if(m_veHandle)
+        RemoveVectoredExceptionHandler(m_veHandle);
 }

@@ -63,6 +63,7 @@ class MainWindow : public QMainWindow
                      std::same_as<std::remove_cvref_t<U>, FoundOccurrences>
         void put(T &&data, U &&occur)
         {
+            std::scoped_lock lck(mtx);
             auto [it, _] = s.try_emplace(std::forward<T>(data));
             auto &key = it->first;
 
@@ -77,6 +78,7 @@ class MainWindow : public QMainWindow
 
         void erase(const std::vector<uint8_t> &data)
         {
+            std::scoped_lock lck(mtx);
             auto it = s.find(data);
             if (it == s.end())
                 return;
@@ -101,6 +103,7 @@ class MainWindow : public QMainWindow
 
         void erase(const std::vector<uint8_t> &data, const FoundOccurrences &occur)
         {
+            std::scoped_lock lck(mtx);
             auto it = s.find(data);
             if (it == s.end())
                 return;
@@ -125,13 +128,15 @@ class MainWindow : public QMainWindow
 
         void clear()
         {
+            std::scoped_lock lck(mtx);
             s.clear();
             viewSortedItems.clear();
         }
 
         auto getFirst() const
         {
-            return std::ranges::subrange(viewSortedItems.begin(), viewSortedItems.end());
+            std::scoped_lock lck(mtx);
+            return std::vector(viewSortedItems.begin(), viewSortedItems.end());
         }
 
       private:
@@ -162,6 +167,7 @@ class MainWindow : public QMainWindow
 
         std::unordered_map<std::vector<uint8_t>, std::set<FoundOccurrences>, VectorHash> s;
         std::multiset<SortedItem, CompareItem> viewSortedItems;
+        mutable std::mutex mtx;
     };
 
     class RpcClient
@@ -179,7 +185,7 @@ class MainWindow : public QMainWindow
             return m_sender.send_command(m_cnt.fetch_add(1, std::memory_order_relaxed), id, type, create_fn, std::forward<Args>(args)...);
         }
         template <typename TCreateFn, typename... Args>
-        bool send_rpc_cb(std::function<void(void)> cb, Interface::CommandID id, Interface::Command type,
+        bool send_rpc_cb(std::function<void(const Interface::CommandEnvelope *msg)> cb, Interface::CommandID id, Interface::Command type,
                          TCreateFn create_fn, Args &&...args)
         {
             auto cnt = m_cnt.fetch_add(1, std::memory_order_relaxed);
@@ -195,8 +201,11 @@ class MainWindow : public QMainWindow
             }
             return true;
         }
-        void call_cb(uint64_t request_id)
+        void call_cb(const Interface::CommandEnvelope *msg)
         {
+            if(msg == nullptr)
+                return;
+            auto request_id = msg->request_id();
             decltype(m_callbacks)::mapped_type cb;
             {
                 std::scoped_lock lck(m_mtx);
@@ -206,13 +215,13 @@ class MainWindow : public QMainWindow
                 cb = std::move(it->second);
                 m_callbacks.erase(it);
             }
-            if (cb) cb();
+            if (cb) cb(msg);
         }
         private:
         MessageIPCSender &m_sender;
         std::atomic_uint64_t m_cnt = 0;
         std::mutex m_mtx;
-        std::unordered_map<uint64_t, std::function<void(void)>> m_callbacks;
+        std::unordered_map<uint64_t, std::function<void(const Interface::CommandEnvelope *msg)>> m_callbacks;
     };
 
     RpcClient m_rpc_client;
@@ -220,4 +229,9 @@ class MainWindow : public QMainWindow
     bool m_hooked = false;
     std::mutex m_hook_mutex;
     std::condition_variable m_hook_cv;
+
+
+    std::atomic_size_t m_pending = 0;
+    std::mutex m_to_remove_mtx;
+    std::vector<std::pair<std::vector<uint8_t>, FoundOccurrences>> to_remove;
 };
