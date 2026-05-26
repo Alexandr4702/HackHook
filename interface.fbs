@@ -37,7 +37,6 @@ table ReadCommand {
 }
 
 table ReadAck {
-  offset: ulong;
   data: [ubyte];
 }
 

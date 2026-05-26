@@ -6,6 +6,7 @@
 #include <atomic>
 #include <vector>
 #include <thread>
+#include "MemoryScanner.h"
 
 #include <memory_resource>
 
@@ -40,6 +41,7 @@ class MyHook
     HWND m_targetHwnd = nullptr;
     MessageIPCSender m_sender;
     SharedBuffer m_reciver;
+    std::optional<MemTool> m_memTool;
   
     const size_t allocate_size = 128 * 1024 * 1024;
     void* m_pmrPoolMem = nullptr;

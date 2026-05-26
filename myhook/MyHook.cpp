@@ -6,6 +6,7 @@
 #include <sstream>
 #include <iomanip>
 #include <array>
+#include <utility>
 #include <vector>
 #include <unordered_map>
 #include <format>
@@ -18,6 +19,7 @@
 #include "MyHook.h"
 #include "MemDumper.h"
 #include "MemoryScanner.h"
+#include "interface_generated.h"
 
 void SendKeyToWindow(HWND hWnd, char key);
 
@@ -52,6 +54,7 @@ void MyHook::start()
     if (m_threadStarted.exchange(true))
         return;
 
+    m_memTool.emplace();
     m_reciver.init(BUFFER_NAME_TX, BUFFER_CAPACITY, false);
     m_sender.init(BUFFER_NAME_RX, false);
     m_running.store(true, std::memory_order_release);
@@ -60,6 +63,7 @@ void MyHook::start()
 
 void MyHook::stop()
 {
+    m_memTool.reset();
     m_running.store(false, std::memory_order_release);
     LOG(m_log, "MyHook Stopped");
 }
@@ -81,14 +85,56 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
 
     switch (msg->id())
     {
-    case Interface::CommandID_WRITE:
-        LOG(m_log, std::format("Received write command with offset: {}", msg->body_as_WriteCommand()->offset()));
+    case Interface::CommandID_WRITE: {
+        const auto *cmd = msg->body_as_WriteCommand();
+        if (!cmd)
+        {
+            LOG(m_log, "WRITE command: invalid payload");
+            break;
+        }
+
+        const auto offset = cmd->offset();
+        const auto data = cmd->data();
+        const auto size = data->size();
+
+        LOG(m_log, std::format("Received write command with offset: {}, size: {}", offset, size));
+
+        if (!m_memTool)
+        {
+            LOG(m_log, "m_memTool is not created");
+            break;
+        }
+
+        bool ok = m_memTool->write(offset, data->data(), size);
+
+        if (!ok)
+        {
+            LOG(m_log, "WRITE failed");
+        }
+
+        m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE,
+                              Interface::CreateEmptyCommand);
 
         break;
-    case Interface::CommandID_READ:
+    }
+    case Interface::CommandID_READ: {
         LOG(m_log, std::format("Received read command with offset: {}", msg->body_as_ReadCommand()->offset()));
-        msg->body_as_ReadCommand()->size();
+        if (!m_memTool)
+        {
+            m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_NACK,
+                                  Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+            break;
+        }
+
+        std::pmr::vector<uint8_t> readed_data(msg->body_as_ReadCommand()->size(), &m_pool);
+        auto readed = m_memTool->read(msg->body_as_ReadCommand()->offset(), readed_data.data(), msg->body_as_ReadCommand()->size());
+        auto read_ack_func = [data = std::move(readed_data), readed](flatbuffers::FlatBufferBuilder &builder) -> flatbuffers::Offset<Interface::ReadAck> {
+            return Interface::CreateReadAck(builder, builder.CreateVector(data.data(), readed));
+        };
+        m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_READ_ACK,
+                              Interface::Command::Command_ReadAck, read_ack_func);
         break;
+    }
     case Interface::CommandID_DUMP: {
         LOG(m_log, "Received CommandID_DUMP command");
         std::string dump_location = g_params.logDumpLocation + "dump_" + Logger::GetTimestamp() + "\\";
@@ -106,25 +152,37 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
         LOG(m_log, std::format("Pattern size: {}", pattern.size()));
 
         std::pmr::vector<Region> exludedRegions(&m_pool);
-        exludedRegions.emplace_back(reinterpret_cast<uint8_t*>(m_pmrPoolMem), reinterpret_cast<uint8_t*>(m_pmrPoolMem) + allocate_size);
-        uint8_t* m_reciver_address = reinterpret_cast<uint8_t*>(m_reciver.get_shared_buffer_pointer());
-        uint8_t* m_sender_address = reinterpret_cast<uint8_t*>(m_sender.get_shared_buffer_pointer());
+        exludedRegions.emplace_back(reinterpret_cast<uint8_t *>(m_pmrPoolMem),
+                                    reinterpret_cast<uint8_t *>(m_pmrPoolMem) + allocate_size);
+        uint8_t *m_reciver_address = reinterpret_cast<uint8_t *>(m_reciver.get_shared_buffer_pointer());
+        uint8_t *m_sender_address = reinterpret_cast<uint8_t *>(m_sender.get_shared_buffer_pointer());
         exludedRegions.emplace_back(m_reciver_address, m_reciver_address + m_reciver.get_shared_buffer_size());
         exludedRegions.emplace_back(m_sender_address, m_sender_address + m_sender.get_shared_buffer_size());
-        auto  results = find(pattern, m_pool, std::move(exludedRegions));
 
-        LOG(m_log, std::format("[MyHook] Found {} results", results.size()));
+        std::pmr::vector<FoundOccurrences> results;
+        if (m_memTool)
+        {
+            results = m_memTool->find(pattern, m_pool, std::move(exludedRegions));
+        }
+        else
+        {
+            LOG(m_log, "m_memTool is not created");
+            return;
+        }
 
-        auto createFindAck = [this, m_reciver_address, m_sender_address](flatbuffers::FlatBufferBuilder &builder, const auto& value_data,
-                                Interface::ValueType value_type,
-                                const auto& occs_vec) -> flatbuffers::Offset<Interface::FindAck> {
+        LOG(m_log, std::format("Found {} results", results.size()));
+
+        auto createFindAck = [this, m_reciver_address,
+                              m_sender_address](flatbuffers::FlatBufferBuilder &builder, const auto &value_data,
+                                                Interface::ValueType value_type,
+                                                const auto &occs_vec) -> flatbuffers::Offset<Interface::FindAck> {
             // occurrences
             std::pmr::vector<flatbuffers::Offset<Interface::FoundOccurrences>> occs_fb(&m_pool);
             occs_fb.reserve(occs_vec.size());
             for (const auto &o : occs_vec)
             {
-                occs_fb.push_back(
-                    Interface::CreateFoundOccurrences(builder, o.baseAddress, o.offset, o.region_size, o.data_size, value_type));
+                occs_fb.push_back(Interface::CreateFoundOccurrences(builder, o.baseAddress, o.offset, o.region_size,
+                                                                    o.data_size, value_type));
             }
 
             auto occs_vector = builder.CreateVector(occs_fb);
@@ -132,7 +190,8 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
 
             return CreateFindAck(builder, value_vector, value_type, occs_vector);
         };
-        m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_FIND_ACK, Interface::Command::Command_FindAck, createFindAck, pattern, value_type, results);
+        m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_FIND_ACK,
+                              Interface::Command::Command_FindAck, createFindAck, pattern, value_type, results);
 
         break;
     }
@@ -140,7 +199,8 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
         const HWND hwnd = reinterpret_cast<HWND>(msg->body_as_PressKeyCommand()->hwnd());
         const char key = msg->body_as_PressKeyCommand()->key();
         SendKeyToWindow(hwnd, key);
-        m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+        m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE,
+                              Interface::CreateEmptyCommand);
         break;
     }
     default:
