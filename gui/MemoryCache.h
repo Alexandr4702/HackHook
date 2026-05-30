@@ -73,11 +73,10 @@ class MemoryCache
 
     void add_view(uint64_t address, size_t size, Interface::ValueType type)
     {
-        m_views.emplace(View{
+        add_view(View{
             .range = {.base = address, .size = size},
             .type = type,
         });
-
     }
 
     void add_view(View view)
@@ -134,26 +133,26 @@ class MemoryCache
             return;
         }
         Region tmp = {.range = region};
-        auto it = std::lower_bound(m_regions.begin(), m_regions.end(), tmp);
+        auto it = m_regions.lower_bound(tmp);
         
         if(it != m_regions.begin() && std::prev(it)->range.overlaps(region))
         {
             it = std::prev(it);
         }
 
-        std::vector<RegionRange> overlapped_regions;
         std::vector<uint8_t> overlapped_data;
-        uint64_t new_begin = it->range.base;
-        uint64_t new_end = it->range.end();
+        const uint64_t new_base = std::min(it->range.base, region.base);
+        uint64_t new_end = region.end();
         while(it != m_regions.end() && region.overlaps(it->range))
         {
-            new_end = max(new_end, it->range.end());
-            size_t current_size = new_end - new_begin;
-            overlapped_data.resize(new_end - new_begin);
-            std::copy(it->data.begin(), it->data.end(), overlapped_data.begin() + current_size);
-            it++;
+            new_end = std::max(new_end, it->range.end());
+            const size_t offset = it->range.base - new_base;
+            const size_t current_size = new_end - new_base;
+            overlapped_data.resize(current_size);
+            std::copy(it->data.begin(), it->data.end(), overlapped_data.begin() + offset);
+            it = m_regions.erase(it);
         }
-
+        m_regions.insert({.range = {.base = new_base, .size = new_end - new_base}, .data = std::move(overlapped_data)});
     }
 
     void remove_region(const RegionRange& region)
