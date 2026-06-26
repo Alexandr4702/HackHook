@@ -1,8 +1,13 @@
 #include "mainwindow.h"
+#include "MemoryCache.h"
 #include "interface_generated.h"
 #include "ui_mainwindow.h"
+#include <QMetaObject>
+#include <QTableWidgetItem>
 #include <atomic>
 #include <cstdint>
+#include <memory>
+#include <span>
 #include <thread>
 #include <vector>
 #include <windows.h>
@@ -170,7 +175,14 @@ void MainWindow::MsgConsumerThread()
             qDebug() << "Failed to consume data";
             continue;
         }
-        HandleMessage(GetCommandEnvelope(buff.data()));
+        qDebug() << "[HandleMessage] Received";
+        auto msg_data = std::make_shared<std::vector<uint8_t>>(buff);
+        QMetaObject::invokeMethod(
+            this,
+            [this, msg_data]() {
+                HandleMessage(GetCommandEnvelope(msg_data->data()));
+            },
+            Qt::QueuedConnection);
     }
 
     return;
@@ -188,9 +200,15 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
         break;
     case Interface::CommandID_ACK:
         qDebug() << "[HandleMessage] Received CommandID_ACK command";
+        m_rpc_client.call_cb(msg->request_id(), msg);
         break;
     case Interface::CommandID_READ_ACK:
         qDebug() << "[HandleMessage] Received CommandID_READ_ACK command";
+        m_rpc_client.call_cb(msg->request_id(), msg);
+        break;
+    case Interface::CommandID_NACK:
+        qDebug() << "[HandleMessage] Received CommandID_NACK command";
+        m_rpc_client.call_cb(msg->request_id(), msg);
         break;
     case Interface::CommandID_FIND_ACK:
     {
@@ -209,7 +227,13 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
             found.data_size = occur->data_size();
             found.type = occur->type();
 
-            m_occur_storage.put(data, std::move(found));
+            auto base = occur->base_address() + occur->offset();
+            auto size =  occur->data_size();
+            auto type = static_cast<Interface::ValueType>(occur->type());
+
+            MemoryCache::View v{.range = {base, size}, .type = type};
+
+            m_occur_storage.put(data, std::move(v));
         }
         printOccurences(m_occur_storage);
         break;
@@ -332,20 +356,105 @@ void MainWindow::on_nextScanButton_clicked()
     auto value_type = ui->valueTypeCombo->currentData().toInt();
     const auto &text = ui->valueEdit->text();
     std::vector<uint8_t> data = string2data(text, value_type);
-    auto view = m_occur_storage.getFirst();
 
-    for(const auto&[occur, dataRef] : view)
+    if (data.empty())
     {
-        const auto &data_el = dataRef.get();
-        qDebug() << occur.baseAddress;
-        occur.offset;
-        if (data == data_el)
-        {
-
-        }
+        qDebug() << "Failed to parse value";
+        return;
     }
 
-    qDebug() << "on_nextScan_clicked";
+    const auto type = static_cast<Interface::ValueType>(value_type);
+    refreshCachedRegions([this, data = std::move(data), type]() {
+        filterOccurrences(data, type);
+        printOccurences(m_occur_storage);
+        qDebug() << "on_nextScan_clicked";
+    });
+}
+
+void MainWindow::refreshCachedRegions(std::function<void()> done)
+{
+    std::vector<MemoryCache::RegionRange> regions;
+    regions.reserve(m_occur_storage.regions().size());
+    for (const auto &region : m_occur_storage.regions())
+    {
+        regions.push_back(region.range);
+    }
+
+    if (regions.empty())
+    {
+        done();
+        return;
+    }
+
+    struct RefreshState
+    {
+        size_t pending = 0;
+        std::function<void()> done;
+    };
+
+    auto state = std::make_shared<RefreshState>();
+    state->pending = regions.size();
+    state->done = std::move(done);
+
+    auto finish_one = [this, state]() {
+        if (state->pending == 0)
+            return;
+
+        --state->pending;
+        if (state->pending != 0)
+            return;
+
+        if (state->done)
+            state->done();
+    };
+
+    for (const auto &range : regions)
+    {
+        const bool sent = m_rpc_client.send_rpc_cb(
+            [this, range, finish_one](const Interface::CommandEnvelope *msg) {
+                if (msg && msg->id() == Interface::CommandID_READ_ACK)
+                {
+                    const auto *ack = msg->body_as_ReadAck();
+                    const auto *read_data = ack ? ack->data() : nullptr;
+                    if (read_data && read_data->size() == range.size)
+                    {
+                        m_occur_storage.update_data(
+                            range, std::vector<uint8_t>(read_data->data(), read_data->data() + read_data->size()));
+                    }
+                }
+                finish_one();
+            },
+            Interface::CommandID_READ, Interface::Command::Command_ReadCommand, Interface::CreateReadCommand, range.base,
+            static_cast<uint64_t>(range.size));
+
+        if (!sent)
+        {
+            finish_one();
+        }
+    }
+}
+
+void MainWindow::filterOccurrences(std::span<const uint8_t> value, Interface::ValueType type)
+{
+    std::vector<MemoryCache::View> views;
+    views.reserve(m_occur_storage.views().size());
+    for (const auto &view : m_occur_storage.views())
+    {
+        views.push_back(view);
+    }
+
+    for (const auto &view : views)
+    {
+        auto cached_data = m_occur_storage.data(view.range);
+        const bool matches =
+            view.type == type && cached_data && cached_data->size() >= value.size() &&
+            std::ranges::equal(value, std::span<const uint8_t>(cached_data->data(), value.size()));
+
+        if (!matches)
+        {
+            m_occur_storage.remove_view(view);
+        }
+    }
 }
 
 void MainWindow::on_pressKeyButton_clicked()
@@ -365,30 +474,42 @@ void MainWindow::on_clearButton_clicked()
     printOccurences(m_occur_storage);
 }
 
-void MainWindow::printOccurences(const OccurrencesStorage &occurences)
+void MainWindow::printOccurences(const MemoryCache &occurences)
 {
-    auto view = occurences.getFirst();
-
     auto *table = ui->resultsTable;
+    table->setSortingEnabled(false);
+    table->clearContents();
+    table->setRowCount(static_cast<int>(occurences.views().size()));
 
-    table->setRowCount(static_cast<int>(std::ranges::distance(view)));
     int row = 0;
-
-    for (const auto &[occur, dataRef] : view)
+    for (const auto &view : occurences.views())
     {
-        const auto &data = dataRef.get();
+        auto data = occurences.data(view.range);
+        if (!data)
+            continue;
 
-        auto valStr = valueToString(std::span<const uint8_t>(data.data(), data.size()),
-                                    static_cast<Interface::ValueType>(occur.type));
+        auto region_it = std::ranges::find_if(occurences.regions(), [&view](const MemoryCache::Region &region) {
+            return region.range.contains(view.range);
+        });
 
-        table->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(valStr)));
-        table->setItem(row, 1, new QTableWidgetItem(QString("0x%1").arg(occur.baseAddress + occur.offset, 0, 16)));
-        table->setItem(row, 2, new QTableWidgetItem(QString("0x%1").arg(occur.baseAddress, 0, 16)));
-        table->setItem(row, 3, new QTableWidgetItem(QString::number(occur.offset)));
-        table->setItem(row, 4, new QTableWidgetItem(QString::number(occur.region_size)));
-        table->setItem(row, 5, new QTableWidgetItem(QString::number(occur.data_size)));
-        table->setItem(row, 6, new QTableWidgetItem(QString::fromStdString(valueTypes[occur.type].first)));
+        const uint64_t region_base = region_it != occurences.regions().end() ? region_it->range.base : view.range.base;
+        const size_t region_size = region_it != occurences.regions().end() ? region_it->range.size : view.range.size;
+        const uint64_t region_offset = view.range.base - region_base;
+        const auto type_index = static_cast<size_t>(view.type);
+        const char *type_text = type_index < valueTypes.size() ? valueTypes[type_index].first : "Unknown";
+
+        table->setItem(row, 0,
+                       new QTableWidgetItem(QString::fromStdString(valueToString(std::span<const uint8_t>(*data), view.type))));
+        table->setItem(row, 1, new QTableWidgetItem(QString("0x%1").arg(view.range.base, 0, 16)));
+        table->setItem(row, 2, new QTableWidgetItem(QString("0x%1").arg(region_base, 0, 16)));
+        table->setItem(row, 3, new QTableWidgetItem(QString::number(region_offset)));
+        table->setItem(row, 4, new QTableWidgetItem(QString::number(region_size)));
+        table->setItem(row, 5, new QTableWidgetItem(QString::number(view.range.size)));
+        table->setItem(row, 6, new QTableWidgetItem(QString::fromUtf8(type_text)));
         table->setItem(row, 7, new QTableWidgetItem{});
         ++row;
     }
+
+    table->setRowCount(row);
+    table->setSortingEnabled(true);
 }
