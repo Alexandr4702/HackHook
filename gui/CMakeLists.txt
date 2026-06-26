@@ -18,6 +18,9 @@ add_executable(gui_app
     mainwindow.ui
 )
 
+target_compile_options(gui_core PRIVATE -g -O0)
+target_compile_options(gui_app PRIVATE -g -O0)
+
 target_link_libraries(gui_app
     PRIVATE Qt6::Widgets injector common gui_core
 )

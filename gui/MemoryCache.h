@@ -1,11 +1,14 @@
+#ifndef MEMORYCACHE_H
+#define MEMORYCACHE_H
+
 #include "interface_generated.h"
-#include <algorithm>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
-#include <map>
+#include <optional>
+#include <set>
 #include <stdint.h>
 #include <vector>
-
 
 class MemoryCache
 {
@@ -14,37 +17,43 @@ class MemoryCache
     {
         uint64_t base = 0;
         size_t size = 0;
-        std::strong_ordering operator<=>(const RegionRange &other) const
-        {
-            if (auto cmp = base <=> other.base; cmp != 0)
-                return cmp;
 
-            return size <=> other.size;
-        }
+        auto operator<=>(const RegionRange &) const = default;
 
-        uint64_t end() const
+        [[nodiscard]]
+        uint64_t end() const noexcept
         {
             return base + size;
         }
 
-        bool overlaps(uint64_t b, uint64_t e) const
+        [[nodiscard]]
+        bool overlaps(const RegionRange &other) const noexcept
         {
-            return !(e <= base || b >= end());
+            return other.base < end() && base < other.end();
         }
 
-        bool overlaps(const RegionRange& other) const
+        [[nodiscard]]
+        bool overlaps(uint64_t b, uint64_t e) const noexcept
         {
-            return !(other.end() <= base || other.base >= end());
+            return overlaps({b, static_cast<size_t>(e - b)});
         }
 
-        bool contains(uint64_t address, size_t size) const
+        [[nodiscard]]
+        bool overlapsInclusive(const RegionRange &other) const noexcept
         {
-            return address >= base && (address + size) <= end();
+            return !(other.end() < base || other.base > end());
         }
 
-        bool contains(const RegionRange& other) const
+        [[nodiscard]]
+        bool contains(const RegionRange &other) const noexcept
         {
             return other.base >= base && other.end() <= end();
+        }
+
+        [[nodiscard]]
+        bool contains(uint64_t address, size_t sz) const noexcept
+        {
+            return contains({address, sz});
         }
     };
 
@@ -52,9 +61,13 @@ class MemoryCache
     {
         RegionRange range;
         std::vector<uint8_t> data;
-        auto operator<=>(const Region& other) const
+        auto operator<=>(const Region &other) const
         {
             return range <=> other.range;
+        }
+        bool operator==(const Region &other) const
+        {
+            return range == other.range;
         }
     };
 
@@ -69,6 +82,7 @@ class MemoryCache
 
             return type <=> other.type;
         }
+        bool operator==(const View &) const = default;
     };
 
     void add_view(uint64_t address, size_t size, Interface::ValueType type)
@@ -81,39 +95,19 @@ class MemoryCache
 
     void add_view(View view)
     {
+        if (view.range.size == 0)
+            return;
+
         m_views.insert(view);
         add_region(view.range);
     }
 
+    void remove_view(const View &el);
     void remove_view(uint64_t address, size_t size, Interface::ValueType type)
     {
         View el = View{.range = {.base = address, .size = size}, .type = type};
-        auto it = m_views.find(el);
-        if (it == m_views.end())
-        {
-            return;
-        }
-        m_views.erase(it);
-
-        if (std::any_of(m_views.begin(), m_views.end(),
-                        [&el](const View &other) { return other.range.contains(el.range); }))
-            return;
-
-        remove_region(el.range);
+        remove_view(el);
     }
-
-    // void filter_views(std::span<const uint8_t> pattern)
-    // {
-    //     std::erase_if(m_views, [&](const View &v) {
-    //         auto bytes = read_cached(v.address, v.size);
-
-    //         if (bytes.size() < pattern.size())
-    //             return true;
-
-    //         return !std::equal(pattern.begin(), pattern.end(), bytes.begin());
-    //     });
-    // }
-
     const auto &views() const
     {
         return m_views;
@@ -124,72 +118,26 @@ class MemoryCache
         return m_regions;
     }
 
+    void clear()
+    {
+        m_regions.clear();
+        m_views.clear();
+    }
+
+    void put(std::vector<uint8_t> data, View &&v);
+    bool update_data(const RegionRange &range, std::vector<uint8_t> data);
+    std::optional<std::vector<uint8_t>> data(const RegionRange &range) const;
+
   private:
-    void add_region(const RegionRange &region)
-    {
-        if(m_regions.empty())
-        {
-            m_regions.insert({.range = region});
-            return;
-        }
-        Region tmp = {.range = region};
-        auto it = m_regions.lower_bound(tmp);
-        
-        if(it != m_regions.begin() && std::prev(it)->range.overlaps(region))
-        {
-            it = std::prev(it);
-        }
-
-        std::vector<uint8_t> overlapped_data;
-        const uint64_t new_base = std::min(it->range.base, region.base);
-        uint64_t new_end = region.end();
-        while(it != m_regions.end() && region.overlaps(it->range))
-        {
-            new_end = std::max(new_end, it->range.end());
-            const size_t offset = it->range.base - new_base;
-            const size_t current_size = new_end - new_base;
-            overlapped_data.resize(current_size);
-            std::copy(it->data.begin(), it->data.end(), overlapped_data.begin() + offset);
-            it = m_regions.erase(it);
-        }
-        m_regions.insert({.range = {.base = new_base, .size = new_end - new_base}, .data = std::move(overlapped_data)});
-    }
-
-    void remove_region(const RegionRange& region)
-    {
-    }
-
-    // std::span<const uint8_t>
-    // read_region(uint64_t address,
-    //             size_t size) const
-    // {
-    //     auto it = find_region(address,
-    //                           size);
-
-    //     if (it == m_regions.end())
-    //         return {};
-
-    //     const auto offset =
-    //         address - it->base;
-
-    //     return std::span<const uint8_t>(
-    //         it->bytes.data() + offset,
-    //         size);
-    // }
-
-    // auto find_region(uint64_t address,
-    //                  size_t size) const
-    // {
-    //     return std::ranges::find_if(
-    //         m_regions,
-    //         [&](const Region& r)
-    //         {
-    //             return r.contains(address,
-    //                               size);
-    //         });
-    // }
+    std::set<Region>::iterator find_containing_region(const RegionRange &range);
+    std::set<Region>::const_iterator find_containing_region(const RegionRange &range) const;
+    bool replace_data(const RegionRange &range, std::vector<uint8_t> data);
+    void add_region(const RegionRange &region);
+    void remove_region(const RegionRange &region);
 
   private:
     std::set<Region> m_regions;
     std::set<View> m_views;
 };
+
+#endif
