@@ -175,7 +175,6 @@ void MainWindow::MsgConsumerThread()
             qDebug() << "Failed to consume data";
             continue;
         }
-        qDebug() << "[HandleMessage] Received";
         auto msg_data = std::make_shared<std::vector<uint8_t>>(buff);
         QMetaObject::invokeMethod(
             this,
