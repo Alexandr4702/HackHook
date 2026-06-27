@@ -3,6 +3,9 @@
 
 void SharedBuffer::init(const std::string &shm_name, std::size_t capacity, bool create)
 {
+    if (capacity == 0)
+        return;
+
     m_size = sizeof(Buffer) + capacity + 64 * 1024;
     // Cleanup old buffer if re-init
     if (m_buf)
@@ -14,6 +17,7 @@ void SharedBuffer::init(const std::string &shm_name, std::size_t capacity, bool 
         start_segment_ptr = nullptr;
     }
 
+    m_shm_name = shm_name;
     m_creator = create;
     if (m_creator)
     {
@@ -41,13 +45,13 @@ void SharedBuffer::init(const std::string &shm_name, std::size_t capacity, bool 
 
 SharedBuffer::~SharedBuffer()
 {
-    if (m_creator)
+    if (m_creator && !m_shm_name.empty())
         bip::shared_memory_object::remove(m_shm_name.c_str());
 }
 
 bool SharedBuffer::produce_block(std::span<const uint8_t> src)
 {
-    if (!m_buf) return false;
+    if (!m_buf || src.size() > m_buf->capacity) return false;
 
     bip::scoped_lock lock(m_buf->mutex);
     m_buf->not_full.wait(lock, [&] { return m_buf->available_space() >= src.size() || m_buf->closed; });
@@ -70,7 +74,7 @@ bool SharedBuffer::produce_block(std::span<const uint8_t> src)
 
 bool SharedBuffer::consume_block(std::span<uint8_t> dest)
 {
-    if (!m_buf) return false;
+    if (!m_buf || dest.size() > m_buf->capacity) return false;
 
     bip::scoped_lock lock(m_buf->mutex);
     m_buf->not_empty.wait(lock, [&] { return m_buf->count >= dest.size() || m_buf->closed; });

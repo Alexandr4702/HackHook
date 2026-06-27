@@ -28,9 +28,9 @@ public:
 
     inline void *get_shared_buffer_pointer()
     {return start_segment_ptr;}
-    inline const size_t get_shared_buffer_size()
+    inline size_t get_shared_buffer_size() const
     {return m_size;}
-    size_t m_size;
+    size_t m_size = 0;
     void* start_segment_ptr = nullptr;
 private:
     struct Buffer
@@ -53,7 +53,7 @@ private:
     std::string m_shm_name;
     bip::managed_shared_memory m_shm;
     Buffer* m_buf = nullptr;
-    bool m_creator;
+    bool m_creator = false;
 };
 
 #endif

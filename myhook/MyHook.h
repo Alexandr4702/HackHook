@@ -50,11 +50,8 @@ class MyHook
 
     void HandleMessage(const Interface::CommandEnvelope *msg);
 
-    DWORD ThreadsCreator();
     DWORD MsgConsumerThread();
 
-    // static wrappers for CreateThread
-    static DWORD WINAPI ThreadWrapperCreator(LPVOID);
     static DWORD WINAPI ThreadWrapperMsg(LPVOID);
 };
 

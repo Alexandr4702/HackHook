@@ -5,9 +5,11 @@
 #include <QMetaObject>
 #include <QTableWidgetItem>
 #include <atomic>
+#include <charconv>
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <string_view>
 #include <thread>
 #include <vector>
 #include <windows.h>
@@ -31,37 +33,47 @@ namespace
         using namespace Interface;
 
         std::vector<uint8_t> data;
-        bool ok = true;
+        const QByteArray utf8 = text.toUtf8();
+        const std::string_view input(utf8.constData(), static_cast<size_t>(utf8.size()));
+
+        auto parse_value = [input, &data](auto &value) {
+            const auto [end, error] = std::from_chars(input.data(), input.data() + input.size(), value);
+            if (error != std::errc{} || end != input.data() + input.size())
+                return false;
+
+            const auto *bytes = reinterpret_cast<const uint8_t *>(&value);
+            data.assign(bytes, bytes + sizeof(value));
+            return true;
+        };
 
         switch (value_type)
         {
         case ValueType::ValueType_Int32: {
-            int32_t val = text.toInt(&ok);
-            uint8_t *p = reinterpret_cast<uint8_t *>(&val);
-            data.assign(p, p + sizeof(val));
+            int32_t val = 0;
+            if (!parse_value(val))
+                return {};
             break;
         }
         case ValueType::ValueType_Float: {
-            float val = text.toFloat(&ok);
-            uint8_t *p = reinterpret_cast<uint8_t *>(&val);
-            data.assign(p, p + sizeof(val));
+            float val = 0;
+            if (!parse_value(val))
+                return {};
             break;
         }
         case ValueType::ValueType_Double: {
-            double val = text.toDouble(&ok);
-            uint8_t *p = reinterpret_cast<uint8_t *>(&val);
-            data.assign(p, p + sizeof(val));
+            double val = 0;
+            if (!parse_value(val))
+                return {};
             break;
         }
         case ValueType::ValueType_Int64: {
-            qint64 val = text.toLongLong(&ok);
-            uint8_t *p = reinterpret_cast<uint8_t *>(&val);
-            data.assign(p, p + sizeof(val));
+            int64_t val = 0;
+            if (!parse_value(val))
+                return {};
             break;
         }
         case ValueType::ValueType_String: {
-            QByteArray val = text.toUtf8();
-            data.assign(val.begin(), val.end());
+            data.assign(input.begin(), input.end());
             break;
         }
         case ValueType::ValueType_String16: {
@@ -71,16 +83,21 @@ namespace
             break;
         }
         case ValueType::ValueType_ByteArray: {
-            std::string hex = text.toStdString();
+            std::string hex(input);
 
             if (hex.size() % 2 != 0)
             {
-                hex = "0" + hex;
+                hex.insert(hex.begin(), '0');
             }
             for (size_t i = 0; i < hex.size(); i += 2)
             {
-                uint8_t byte = static_cast<uint8_t>(std::stoul(hex.substr(i, 2), nullptr, 16));
-                data.push_back(byte);
+                unsigned int value = 0;
+                const char *begin = hex.data() + i;
+                const char *end = begin + 2;
+                const auto [parsed_end, error] = std::from_chars(begin, end, value, 16);
+                if (error != std::errc{} || parsed_end != end)
+                    return {};
+                data.push_back(static_cast<uint8_t>(value));
             }
             break;
         }
@@ -137,8 +154,9 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam)
     if (length == 0)
         return TRUE;
 
-    std::wstring title(length, L'\0');
-    GetWindowTextW(hwnd, &title[0], length + 1);
+    std::wstring title(length + 1, L'\0');
+    const int copied = GetWindowTextW(hwnd, title.data(), static_cast<int>(title.size()));
+    title.resize(copied);
 
     auto comboBox = reinterpret_cast<QComboBox *>(lParam);
     comboBox->addItem(QString::fromStdWString(title));
@@ -169,10 +187,21 @@ void MainWindow::MsgConsumerThread()
             qDebug() << "Failed to consume len";
             continue;
         }
+        if (len == 0 || len > BUFFER_CAPACITY - sizeof(len))
+        {
+            qWarning() << "Invalid IPC message length:" << len;
+            break;
+        }
         buff.resize(len);
         if (!m_reciver.consume_block(std::span<uint8_t>(buff.data(), len)))
         {
             qDebug() << "Failed to consume data";
+            continue;
+        }
+        flatbuffers::Verifier verifier(buff.data(), buff.size());
+        if (!VerifyCommandEnvelopeBuffer(verifier))
+        {
+            qWarning() << "Invalid FlatBuffer message";
             continue;
         }
         auto msg_data = std::make_shared<std::vector<uint8_t>>(buff);
@@ -195,7 +224,8 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
     switch (msg->id())
     {
     case Interface::CommandID_WRITE:
-        qDebug() << "[HandleMessage] Received write command with offset: " << msg->body_as_WriteCommand()->offset();
+        if (const auto *cmd = msg->body_as_WriteCommand())
+            qDebug() << "[HandleMessage] Received write command with offset: " << cmd->offset();
         break;
     case Interface::CommandID_ACK:
         qDebug() << "[HandleMessage] Received CommandID_ACK command";
@@ -212,6 +242,11 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
     case Interface::CommandID_FIND_ACK:
     {
         auto* ack = msg->body_as_FindAck();
+        if (!ack || !ack->value() || !ack->occurrences())
+        {
+            qWarning() << "Invalid FIND_ACK payload";
+            break;
+        }
         auto value = ack->value();
         auto occurrences = ack->occurrences();
         auto value_type = ack->value_type();
@@ -261,8 +296,9 @@ void MainWindow::on_windowSelectorOpened()
             if (length == 0)
                 return TRUE;
 
-            std::wstring title(length, L'\0');
-            GetWindowTextW(hwnd, &title[0], length + 1);
+            std::wstring title(length + 1, L'\0');
+            const int copied = GetWindowTextW(hwnd, title.data(), static_cast<int>(title.size()));
+            title.resize(copied);
 
             auto combo = reinterpret_cast<QComboBox *>(lParam);
             combo->addItem(QString::fromStdWString(title));

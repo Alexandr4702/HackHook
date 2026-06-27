@@ -60,24 +60,6 @@ class MemTool
                                             std::pmr::vector<Region> &&exludeReg);
 
   private:
-    class ProtectGuard
-    {
-        void *addr;
-        size_t size;
-        DWORD old;
-
-      public:
-        ProtectGuard(void *a, size_t s) : addr(a), size(s)
-        {
-            VirtualProtect(addr, size, PAGE_EXECUTE_READWRITE, &old);
-        }
-
-        ~ProtectGuard()
-        {
-            DWORD tmp;
-            VirtualProtect(addr, size, old, &tmp);
-        }
-    };
     PVOID m_veHandle = nullptr;
 };
 
