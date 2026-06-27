@@ -3,8 +3,11 @@
 
 #include "common/common.h"
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <bit>
 #include <cstdint>
+#include <cstring>
 #include <format>
 #include <fstream>
 #include <mutex>
@@ -18,6 +21,8 @@ class Logger
 {
     std::ofstream file;
     mutable std::mutex log_mutex;
+    std::array<char, MAX_PATH> emergency_path{};
+    std::atomic_bool emergency_path_ready = false;
 
 public:
     Logger() = default;
@@ -35,8 +40,15 @@ public:
         if (file.is_open())
             return;
 
+        const size_t path_size = std::min(filename.size(), emergency_path.size() - 1);
+        std::memcpy(emergency_path.data(), filename.data(), path_size);
+        emergency_path[path_size] = '\0';
+        emergency_path_ready.store(true, std::memory_order_release);
         file.open(filename, std::ios::out | std::ios::app);
     }
+
+    void emergency(const char *boundary, const char *details = nullptr) const noexcept;
+    static void emergency_to_default(const char *boundary, const char *details = nullptr) noexcept;
 
     template <typename T>
     Logger& operator<<(T&& value)

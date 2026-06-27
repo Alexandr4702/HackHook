@@ -99,98 +99,123 @@ std::pmr::vector<FoundOccurrences> MemTool::find(std::span<const uint8_t> patter
 
     auto number_of_threads = std::max(1u, std::thread::hardware_concurrency());
     std::vector<std::thread> thread_pool;
+    thread_pool.reserve(number_of_threads);
     std::vector<std::vector<FoundOccurrences>> results(number_of_threads);
     std::atomic_size_t regions_cnt = 0;
     std::latch waitForAddingStacks(number_of_threads);
     std::counting_semaphore<1024> startThreads(0);
 
     std::vector<Region> thread_stack_region(number_of_threads);
+    std::atomic_bool worker_failed = false;
 
     const std::boyer_moore_horspool_searcher<const uint8_t *> searcher(pattern.data(), pattern.data() + pattern.size());
     const SimdBmhAvx2Searcher searcher_Avx2(pattern.data(), pattern.size());
 
 
     auto worker = [&regions, &searcher, &searcher_Avx2, &pattern, &results, &excludedRegions,
-                   &waitForAddingStacks, &startThreads, &regions_cnt, &thread_stack_region](int threadId) {
+                   &waitForAddingStacks, &startThreads, &regions_cnt, &thread_stack_region,
+                   &worker_failed](int threadId) {
 
         thread_stack_region[threadId] = GetCurrentThreadStackRegion();
         waitForAddingStacks.count_down();
         startThreads.acquire();
 
-        std::vector<FoundOccurrences> &local = results[threadId];
-        while (true)
+        try
         {
-            size_t i = regions_cnt.fetch_add(1, std::memory_order_relaxed);
-            if (i >= regions.size())
-                return;
-            const MEMORY_BASIC_INFORMATION& region = regions[i];
-
-            if (setjmp(g_jump) != 0)
+            std::vector<FoundOccurrences> &local = results[threadId];
+            while (true)
             {
-                continue;
+                size_t i = regions_cnt.fetch_add(1, std::memory_order_relaxed);
+                if (i >= regions.size())
+                    return;
+                const MEMORY_BASIC_INFORMATION& region = regions[i];
+
+                if (setjmp(g_jump) != 0)
+                    continue;
+                g_jump_armed = true;
+
+                std::vector<size_t> matches = bmh_simd_avx2_all_extended(
+                    reinterpret_cast<const uint8_t *>(region.BaseAddress), region.RegionSize, searcher_Avx2);
+                g_jump_armed = false;
+
+                for (auto &match : matches)
+                {
+                    FoundOccurrences found;
+                    found.baseAddress = reinterpret_cast<uint64_t>(region.BaseAddress);
+                    found.offset = match;
+                    found.region_size = region.RegionSize;
+                    found.data_size = pattern.size();
+                    found.type = region.Type;
+                    local.emplace_back(found);
+                }
             }
-            g_jump_armed = true;
-
-            // std::vector<size_t> matches = find_all(
-            //     std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(region.BaseAddress), region.RegionSize),
-            //     searcher);
-
-            std::vector<size_t> matches = bmh_simd_avx2_all_extended(
-                reinterpret_cast<const uint8_t *>(region.BaseAddress), region.RegionSize, searcher_Avx2);
+        }
+        catch (...)
+        {
             g_jump_armed = false;
-
-            for (auto &match : matches)
-            {
-                FoundOccurrences found;
-                found.baseAddress = reinterpret_cast<uint64_t>(region.BaseAddress);
-                found.offset = match;
-                found.region_size = region.RegionSize;
-                found.data_size = pattern.size();
-                found.type = region.Type;
-                local.emplace_back(found);
-            }
+            worker_failed.store(true, std::memory_order_release);
         }
     };
 
-    for (int threadId{0}; threadId < number_of_threads; ++threadId)
+    size_t started_threads = 0;
+    for (; started_threads < number_of_threads; ++started_threads)
     {
-        thread_pool.push_back(std::thread(worker, threadId));
+        try
+        {
+            thread_pool.emplace_back(worker, static_cast<int>(started_threads));
+        }
+        catch (...)
+        {
+            break;
+        }
     }
+    if (started_threads < number_of_threads)
+        waitForAddingStacks.count_down(number_of_threads - started_threads);
     waitForAddingStacks.wait();
-    excludedRegions.insert(excludedRegions.end(), thread_stack_region.begin(), thread_stack_region.end());
-
-    std::erase_if(regions, [&excludedRegions](MEMORY_BASIC_INFORMATION &region) {
-        if (region.State != MEM_COMMIT)
-            return true;
-        bool readable =
-            (region.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)) &&
-            !(region.Protect & PAGE_GUARD);
-
-        bool executable = region.Protect & (PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE);
-        if (!readable || executable)
-        {
-            return true;
-        }
-
-        uint8_t *baseAddress = reinterpret_cast<uint8_t *>(region.BaseAddress);
-        Region currentRegion(baseAddress, baseAddress + region.RegionSize);
-
-        for (auto it = excludedRegions.begin(); it < excludedRegions.end(); ++it)
-        {
-            if (it->crosses(currentRegion))
-                return true;
-        }
-
-        return false;
-    });
-
-    startThreads.release(number_of_threads);
-    for (int threadId{0}; threadId < number_of_threads; ++threadId)
+    bool setup_failed = false;
+    try
     {
-        thread_pool[threadId].join();
+        excludedRegions.insert(excludedRegions.end(), thread_stack_region.begin(), thread_stack_region.end());
+
+        std::erase_if(regions, [&excludedRegions](MEMORY_BASIC_INFORMATION &region) {
+            if (region.State != MEM_COMMIT)
+                return true;
+            bool readable =
+                (region.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)) &&
+                !(region.Protect & PAGE_GUARD);
+
+            bool executable = region.Protect & (PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE);
+            if (!readable || executable)
+                return true;
+
+            uint8_t *baseAddress = reinterpret_cast<uint8_t *>(region.BaseAddress);
+            Region currentRegion(baseAddress, baseAddress + region.RegionSize);
+
+            for (auto it = excludedRegions.begin(); it < excludedRegions.end(); ++it)
+            {
+                if (it->crosses(currentRegion))
+                    return true;
+            }
+
+            return false;
+        });
+    }
+    catch (...)
+    {
+        setup_failed = true;
     }
 
-    for (int threadId{0}; threadId < number_of_threads; ++threadId)
+    if (started_threads != 0)
+        startThreads.release(started_threads);
+    for (auto &thread : thread_pool)
+    {
+        thread.join();
+    }
+
+    if (setup_failed || worker_failed.load(std::memory_order_acquire))
+        return result;
+
+    for (size_t threadId = 0; threadId < started_threads; ++threadId)
     {
         result.insert(result.end(), std::make_move_iterator(results[threadId].begin()),
                       std::make_move_iterator(results[threadId].end()));

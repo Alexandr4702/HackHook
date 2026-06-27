@@ -17,9 +17,9 @@ class MyHook
         return instance;
     }
     MyHook();
-    ~MyHook();
+    ~MyHook() noexcept;
 
-    void start();
+    void start() noexcept;
     void stop();
 
     Logger m_log;
@@ -51,7 +51,7 @@ class MyHook
 
     DWORD MsgConsumerThread();
 
-    static DWORD WINAPI ThreadWrapperMsg(LPVOID);
+    static DWORD WINAPI ThreadWrapperMsg(LPVOID) noexcept;
 };
 
 #endif // MYHOOK_H_

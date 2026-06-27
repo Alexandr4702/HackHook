@@ -6,6 +6,7 @@
 #include <sstream>
 #include <iomanip>
 #include <array>
+#include <exception>
 #include <utility>
 #include <vector>
 #include <unordered_map>
@@ -22,7 +23,18 @@
 #include "interface_generated.h"
 
 void SendKeyToWindow(HWND hWnd, char key);
-extern "C" __declspec(dllexport) LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam);
+extern "C" __declspec(dllexport) LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam) noexcept;
+
+namespace
+{
+void report_boundary_error(Logger *logger, const char *boundary, const char *details = nullptr) noexcept
+{
+    if (logger)
+        logger->emergency(boundary, details);
+    else
+        Logger::emergency_to_default(boundary, details);
+}
+} // namespace
 
 MyHook::MyHook(): allocate_size(128 * 1024 * 1024), m_pmrPoolMem(VirtualAlloc(nullptr, allocate_size,
                                 MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)), m_monotonicPool(m_pmrPoolMem, allocate_size), m_pool(&m_monotonicPool)
@@ -36,21 +48,27 @@ MyHook::MyHook(): allocate_size(128 * 1024 * 1024), m_pmrPoolMem(VirtualAlloc(nu
     // std::pmr::synchronized_pool_resource pool(&m_pmrPool);
 }
 
-MyHook::~MyHook()
+MyHook::~MyHook() noexcept
 {
-    LOG(m_log, "MyHook Destroyed");
-
-    m_pool.release();
-    m_monotonicPool.release();
-
-    if (m_pmrPoolMem)
+    try
     {
-        VirtualFree(m_pmrPoolMem, 0, MEM_RELEASE);
-        m_pmrPoolMem = nullptr;
+        LOG(m_log, "MyHook Destroyed");
+        m_pool.release();
+        m_monotonicPool.release();
+
+        if (m_pmrPoolMem)
+        {
+            VirtualFree(m_pmrPoolMem, 0, MEM_RELEASE);
+            m_pmrPoolMem = nullptr;
+        }
+    }
+    catch (...)
+    {
+        report_boundary_error(&m_log, "MyHook::~MyHook");
     }
 }
 
-void MyHook::start()
+void MyHook::start() noexcept
 {
     if (m_stopping.load(std::memory_order_acquire))
         return;
@@ -58,38 +76,56 @@ void MyHook::start()
     if (m_threadStarted.exchange(true))
         return;
 
-    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-                            reinterpret_cast<LPCSTR>(&HookProc), &m_moduleRef))
-    {
-        m_threadStarted.store(false, std::memory_order_release);
-        return;
-    }
-
-    m_memTool.emplace();
-    m_reciver.init(BUFFER_NAME_TX, BUFFER_CAPACITY, false);
-    m_sender.init(BUFFER_NAME_RX, false);
-    m_running.store(true, std::memory_order_release);
-
-    std::string folderName = g_params.logDumpLocation + "dump_" + Logger::GetTimestamp() + "\\";
-    g_params.logDumpLocation = folderName + "\\";
-    CreateDirectory(folderName.c_str(), nullptr);
-    m_log.init(g_params.logDumpLocation + "log.txt");
-
-    HANDLE worker = CreateThread(nullptr, 0, &MyHook::ThreadWrapperMsg, this, 0, nullptr);
-    if (!worker)
-    {
+    auto cleanup_failed_start = [this]() noexcept {
+        m_stopping.store(true, std::memory_order_release);
         m_running.store(false, std::memory_order_release);
         m_threadStarted.store(false, std::memory_order_release);
-        m_memTool.reset();
-        m_reciver.close();
-        m_sender.close();
+        try { m_memTool.reset(); } catch (...) {}
+        try { m_reciver.close(); } catch (...) {}
+        try { m_sender.close(); } catch (...) {}
 
         HMODULE module = std::exchange(m_moduleRef, nullptr);
         if (module)
             FreeLibrary(module);
-        return;
+    };
+
+    try
+    {
+        if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                                reinterpret_cast<LPCSTR>(&HookProc), &m_moduleRef))
+        {
+            cleanup_failed_start();
+            return;
+        }
+
+        m_memTool.emplace();
+        m_reciver.init(BUFFER_NAME_TX, BUFFER_CAPACITY, false);
+        m_sender.init(BUFFER_NAME_RX, false);
+        m_running.store(true, std::memory_order_release);
+
+        std::string folderName = g_params.logDumpLocation + "dump_" + Logger::GetTimestamp() + "\\";
+        g_params.logDumpLocation = folderName + "\\";
+        CreateDirectory(folderName.c_str(), nullptr);
+        m_log.init(g_params.logDumpLocation + "log.txt");
+
+        HANDLE worker = CreateThread(nullptr, 0, &MyHook::ThreadWrapperMsg, this, 0, nullptr);
+        if (!worker)
+        {
+            cleanup_failed_start();
+            return;
+        }
+        CloseHandle(worker);
     }
-    CloseHandle(worker);
+    catch (const std::exception &error)
+    {
+        report_boundary_error(&m_log, "MyHook::start", error.what());
+        cleanup_failed_start();
+    }
+    catch (...)
+    {
+        report_boundary_error(&m_log, "MyHook::start");
+        cleanup_failed_start();
+    }
 }
 
 void MyHook::stop()
@@ -104,17 +140,38 @@ void MyHook::stop()
     LOG(m_log, "MyHook Stopped");
 }
 
-DWORD WINAPI MyHook::ThreadWrapperMsg(LPVOID param)
+DWORD WINAPI MyHook::ThreadWrapperMsg(LPVOID param) noexcept
 {
     auto *self = static_cast<MyHook *>(param);
-    const DWORD result = self->MsgConsumerThread();
+    DWORD result = ERROR_SUCCESS;
+    try
+    {
+        result = self->MsgConsumerThread();
+    }
+    catch (const std::exception &error)
+    {
+        report_boundary_error(&self->m_log, "ThreadWrapperMsg", error.what());
+        result = ERROR_UNHANDLED_EXCEPTION;
+    }
+    catch (...)
+    {
+        report_boundary_error(&self->m_log, "ThreadWrapperMsg");
+        result = ERROR_UNHANDLED_EXCEPTION;
+    }
 
     self->m_running.store(false, std::memory_order_release);
     self->m_threadStarted.store(false, std::memory_order_release);
-    self->m_reciver.close();
-    if (!self->m_stopping.load(std::memory_order_acquire))
-        self->m_sender.close();
-    self->m_memTool.reset();
+    try { self->m_reciver.close(); } catch (...) { report_boundary_error(&self->m_log, "ThreadWrapperMsg receiver cleanup"); }
+    try
+    {
+        if (!self->m_stopping.load(std::memory_order_acquire))
+            self->m_sender.close();
+    }
+    catch (...)
+    {
+        report_boundary_error(&self->m_log, "ThreadWrapperMsg sender cleanup");
+    }
+    try { self->m_memTool.reset(); } catch (...) { report_boundary_error(&self->m_log, "ThreadWrapperMsg MemTool cleanup"); }
 
     HMODULE module = std::exchange(self->m_moduleRef, nullptr);
     if (module)
@@ -349,11 +406,22 @@ DWORD WINAPI MyHook::MsgConsumerThread()
     return 0;
 }
 
-extern "C" __declspec(dllexport) LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
+extern "C" __declspec(dllexport) LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam) noexcept
 {
     if (code >= 0)
     {
-        MyHook::getInstance().start();
+        try
+        {
+            MyHook::getInstance().start();
+        }
+        catch (const std::exception &error)
+        {
+            report_boundary_error(nullptr, "HookProc", error.what());
+        }
+        catch (...)
+        {
+            report_boundary_error(nullptr, "HookProc");
+        }
     }
     return CallNextHookEx(nullptr, code, wParam, lParam);
 }
