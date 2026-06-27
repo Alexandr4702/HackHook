@@ -1,6 +1,8 @@
 #include "MemDumper.h"
+#include "MemoryScanner.h"
 #include "MyHook.h"
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 
@@ -57,7 +59,7 @@ std::vector<THREAD_BASIC_INFORMATION> GetAllThreadInfo(DWORD processId)
     return threadInfos;
 }
 
-std::unordered_map<LPVOID, ModuleInfo> BuildModuleMap(HANDLE hProcess)
+std::unordered_map<LPVOID, ModuleInfo> BuildModuleMap(HANDLE hProcess, MemTool &mem_tool)
 {
     std::unordered_map<LPVOID, ModuleInfo> moduleMap;
 
@@ -77,13 +79,13 @@ std::unordered_map<LPVOID, ModuleInfo> BuildModuleMap(HANDLE hProcess)
             continue;
 
         IMAGE_DOS_HEADER dosHeader;
-        if (!ReadProcessMemory(hProcess, baseAddress, &dosHeader, sizeof(dosHeader), nullptr) ||
+        if (mem_tool.read(reinterpret_cast<uintptr_t>(baseAddress), &dosHeader, sizeof(dosHeader)) != sizeof(dosHeader) ||
             dosHeader.e_magic != IMAGE_DOS_SIGNATURE)
             continue;
 
         IMAGE_NT_HEADERS ntHeaders;
         LPBYTE ntHeaderAddr = static_cast<LPBYTE>(baseAddress) + dosHeader.e_lfanew;
-        if (!ReadProcessMemory(hProcess, ntHeaderAddr, &ntHeaders, sizeof(ntHeaders), nullptr) ||
+        if (mem_tool.read(reinterpret_cast<uintptr_t>(ntHeaderAddr), &ntHeaders, sizeof(ntHeaders)) != sizeof(ntHeaders) ||
             ntHeaders.Signature != IMAGE_NT_SIGNATURE)
             continue;
 
@@ -94,7 +96,8 @@ std::unordered_map<LPVOID, ModuleInfo> BuildModuleMap(HANDLE hProcess)
         {
             IMAGE_SECTION_HEADER sectionHeader;
             LPBYTE thisSectionAddr = sectionHeaderAddr + j * sizeof(IMAGE_SECTION_HEADER);
-            if (!ReadProcessMemory(hProcess, thisSectionAddr, &sectionHeader, sizeof(sectionHeader), nullptr))
+            if (mem_tool.read(reinterpret_cast<uintptr_t>(thisSectionAddr), &sectionHeader, sizeof(sectionHeader)) !=
+                sizeof(sectionHeader))
                 continue;
 
             uintptr_t sectionStart = reinterpret_cast<uintptr_t>(baseAddress) + sectionHeader.VirtualAddress;
@@ -112,7 +115,7 @@ std::unordered_map<LPVOID, ModuleInfo> BuildModuleMap(HANDLE hProcess)
     return moduleMap;
 }
 
-std::vector<SectionInfo> dumpWithMapping(const std::string &filePath, HANDLE hProcess)
+std::vector<SectionInfo> dumpWithMapping(const std::string &filePath, HANDLE hProcess, MemTool &mem_tool)
 {
     SYSTEM_INFO sysInfo;
     GetSystemInfo(&sysInfo);
@@ -120,12 +123,12 @@ std::vector<SectionInfo> dumpWithMapping(const std::string &filePath, HANDLE hPr
     LPVOID currentAddress = sysInfo.lpMinimumApplicationAddress;
     LPVOID maxAddress = sysInfo.lpMaximumApplicationAddress;
 
-    std::unordered_map<LPVOID, ModuleInfo> moduleMap = BuildModuleMap(hProcess);
+    std::unordered_map<LPVOID, ModuleInfo> moduleMap = BuildModuleMap(hProcess, mem_tool);
     std::vector<SectionInfo> sections;
     size_t currentDumpOffset = 0;
 
-    // const size_t kDefaultBufferSize = 4 * 1024 * 1024;
-    // std::vector<BYTE> buffer(kDefaultBufferSize);
+    constexpr size_t buffer_size = 1024 * 1024;
+    std::vector<uint8_t> buffer(buffer_size);
 
     std::ofstream outFile(filePath, std::ios::binary);
     if (!outFile.is_open())
@@ -161,43 +164,20 @@ std::vector<SectionInfo> dumpWithMapping(const std::string &filePath, HANDLE hPr
 
         if ((mbi.State == MEM_COMMIT) && mbi.Protect != PAGE_NOACCESS && !(mbi.Protect & PAGE_GUARD))
         {
-            outFile.write(reinterpret_cast<const char *>(mbi.BaseAddress), mbi.RegionSize);
-            dumpSize = mbi.RegionSize;
-            // SIZE_T bytesRead = 0;
-            // dumpSize = 0;
-            // buffer.reserve(mbi.RegionSize);
-            // dumpSize = bytesRead;
+            const auto region_base = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+            while (dumpSize < mbi.RegionSize)
+            {
+                const size_t chunk_size = std::min(buffer.size(), mbi.RegionSize - dumpSize);
+                const size_t bytes_read = mem_tool.read(region_base + dumpSize, buffer.data(), chunk_size);
+                if (bytes_read == 0)
+                    break;
 
-            // WINBOOL result = ReadProcessMemory(hProcess, mbi.BaseAddress, buffer.data(), mbi.RegionSize, &bytesRead);
+                outFile.write(reinterpret_cast<const char *>(buffer.data()), bytes_read);
+                dumpSize += bytes_read;
 
-            // if (!result || bytesRead != mbi.RegionSize)
-            // {
-            //     DWORD dwError = GetLastError();
-            //     std::stringstream ss;
-            //     ss << "Readed != size: " << dwError << " " << result << " " << bytesRead << " " << mbi.RegionSize
-            //        << "\n";
-            //     // g_log << ss.str();
-            //     switch (dwError)
-            //     {
-            //     case ERROR_ACCESS_DENIED:
-            //         // g_log << "Access denied. Ensure you have appropriate permissions." << std::endl;
-            //         break;
-            //     case ERROR_INVALID_PARAMETER:
-            //         // g_log << "Invalid parameter provided. Check the address or buffer size." << std::endl;
-            //         break;
-            //     case ERROR_PARTIAL_COPY:
-            //         // g_log << "Only part of the memory was read. This may indicate a boundary issue." << std::endl;
-            //         break;
-            //     default:
-            //         // g_log << "Unknown error." << std::endl;
-            //         break;
-            //     }
-            // }
-            // else
-            // {
-            //     dumpSize = bytesRead;
-            //     outFile.write(reinterpret_cast<const char *>(buffer.data()), bytesRead);
-            // }
+                if (!outFile || bytes_read != chunk_size)
+                    break;
+            }
         }
 
         currentAddress = reinterpret_cast<uint8_t *>(currentAddress) + mbi.RegionSize;
@@ -427,7 +407,7 @@ class HeapAnalyzer
     }
 };
 
-void MemRead(std::string out_location)
+void MemRead(std::string out_location, MemTool &mem_tool)
 {
     auto threadInfos = GetAllThreadInfo(GetCurrentProcessId());
     std::ofstream outFile(out_location + "threads_dump.csv");
@@ -440,7 +420,7 @@ void MemRead(std::string out_location)
     }
 
     LOG(MyHook::getInstance().m_log, "MemReadThread started");
-    auto sections = dumpWithMapping(out_location + "mem_dump.bin", GetCurrentProcess());
+    auto sections = dumpWithMapping(out_location + "mem_dump.bin", GetCurrentProcess(), mem_tool);
     DumpMemoryMapToCSV(out_location + "mem_map.csv", sections);
     LOG(MyHook::getInstance().m_log, "DumpMemoryMapToCSV finished");
     std::ofstream csvFile(out_location + "heap_analysis.csv");

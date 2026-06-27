@@ -197,9 +197,15 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
     }
     case Interface::CommandID_DUMP: {
         LOG(m_log, "Received CommandID_DUMP command");
+        if (!m_memTool)
+        {
+            m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_NACK,
+                                  Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+            break;
+        }
         std::string dump_location = g_params.logDumpLocation + "dump_" + Logger::GetTimestamp() + "\\";
         CreateDirectory(dump_location.c_str(), nullptr);
-        MemRead(dump_location);
+        MemRead(dump_location, *m_memTool);
         m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
         break;
     }

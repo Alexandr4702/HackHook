@@ -12,6 +12,8 @@
 
 #include "common/utility.h"
 
+class MemTool;
+
 typedef struct _THREAD_BASIC_INFORMATION
 {
     NTSTATUS ExitStatus;
@@ -53,6 +55,6 @@ struct SectionInfo
     std::string sectionName;
 };
 
-void MemRead(std::string out_location);
+void MemRead(std::string out_location, MemTool &mem_tool);
 
 #endif // MEM_DUMPER_CPP_
