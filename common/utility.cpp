@@ -48,6 +48,71 @@ const char *default_emergency_path(char (&path)[MAX_PATH]) noexcept
     std::memcpy(path + length, filename, sizeof(filename));
     return path;
 }
+
+void append_utf8(std::string &out, uint32_t code_point)
+{
+    if (code_point <= 0x7F)
+    {
+        out.push_back(static_cast<char>(code_point));
+    }
+    else if (code_point <= 0x7FF)
+    {
+        out.push_back(static_cast<char>(0xC0 | (code_point >> 6)));
+        out.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
+    }
+    else if (code_point <= 0xFFFF)
+    {
+        out.push_back(static_cast<char>(0xE0 | (code_point >> 12)));
+        out.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
+    }
+    else
+    {
+        out.push_back(static_cast<char>(0xF0 | (code_point >> 18)));
+        out.push_back(static_cast<char>(0x80 | ((code_point >> 12) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
+    }
+}
+
+std::string utf16_to_utf8(std::span<const uint8_t> data)
+{
+    if (data.size() % sizeof(char16_t) != 0)
+        return {};
+
+    std::string out;
+    out.reserve(data.size());
+
+    for (size_t i = 0; i < data.size(); i += sizeof(char16_t))
+    {
+        char16_t first{};
+        std::memcpy(&first, data.data() + i, sizeof(first));
+        uint32_t code_point = first;
+
+        if (first >= 0xD800 && first <= 0xDBFF && i + 2 * sizeof(char16_t) <= data.size())
+        {
+            char16_t second{};
+            std::memcpy(&second, data.data() + i + sizeof(char16_t), sizeof(second));
+            if (second >= 0xDC00 && second <= 0xDFFF)
+            {
+                code_point = 0x10000 + ((first - 0xD800) << 10) + (second - 0xDC00);
+                i += sizeof(char16_t);
+            }
+            else
+            {
+                code_point = 0xFFFD;
+            }
+        }
+        else if (first >= 0xD800 && first <= 0xDFFF)
+        {
+            code_point = 0xFFFD;
+        }
+
+        append_utf8(out, code_point);
+    }
+
+    return out;
+}
 } // namespace
 
 void Logger::emergency(const char *boundary, const char *details) const noexcept
@@ -151,22 +216,7 @@ std::string valueToString(std::span<const uint8_t> data,
             return std::string(reinterpret_cast<const char*>(data.data()), data.size());
 
         case ValueType_String16:
-        {
-            if (data.size() % 2 != 0) break;
-
-            std::u16string str16(
-                reinterpret_cast<const char16_t*>(data.data()),
-                data.size() / 2
-            );
-
-            std::string utf8;
-            utf8.reserve(str16.size());
-
-            for (char16_t c : str16)
-                utf8 += static_cast<char>(c); // всё ещё упрощённо
-
-            return utf8;
-        }
+            return utf16_to_utf8(data);
 
         case ValueType_ByteArray:
             return to_hex();

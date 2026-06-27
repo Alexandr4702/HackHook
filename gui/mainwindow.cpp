@@ -572,8 +572,8 @@ void MainWindow::printOccurences(const MemoryCache &occurences)
         const auto type_index = static_cast<size_t>(view.type);
         const char *type_text = type_index < valueTypes.size() ? valueTypes[type_index].first : "Unknown";
 
-        table->setItem(row, 0,
-                       new QTableWidgetItem(QString::fromStdString(valueToString(std::span<const uint8_t>(*data), view.type))));
+        const auto value_text = valueToString(*data, view.type);
+        table->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(value_text)));
         table->setItem(row, 1, new QTableWidgetItem(QString("0x%1").arg(view.range.base, 0, 16)));
         table->setItem(row, 2, new QTableWidgetItem(QString("0x%1").arg(region_base, 0, 16)));
         table->setItem(row, 3, new QTableWidgetItem(QString::number(region_offset)));
