@@ -10,7 +10,7 @@ class Injector
     ~Injector();
 
     bool hook(const std::wstring &windowTitle, const std::string &dllName = "myhook.dll");
-    void unhook();
+    bool unhook();
     bool isHooked() const;
     HWND getHWND() const
     {return m_hwnd;}

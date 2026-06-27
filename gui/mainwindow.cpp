@@ -7,6 +7,7 @@
 #include <atomic>
 #include <charconv>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -165,55 +166,62 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam)
 
 void MainWindow::MsgConsumerThread()
 {
-    using namespace Interface;
-    std::vector<uint8_t> buff;
-    buff.resize(4);
-
-    while (m_running.load(std::memory_order_acquire))
+    try
     {
-        {
-            std::unique_lock lck(m_hook_mutex);
-            m_hook_cv.wait(lck, [this]() { return m_hooked || !m_running.load(std::memory_order_acquire); });
-        }
+        using namespace Interface;
+        std::vector<uint8_t> buff;
+        buff.resize(4);
 
-        if (!m_running.load(std::memory_order_acquire)) 
+        while (m_running.load(std::memory_order_acquire))
         {
-            break;
-        }
+            {
+                std::unique_lock lck(m_hook_mutex);
+                m_hook_cv.wait(lck, [this]() { return m_hooked || !m_running.load(std::memory_order_acquire); });
+            }
 
-        uint32_t len = 0;
-        if (!m_reciver.consume_block(std::span<uint8_t>(reinterpret_cast<uint8_t *>(&len), sizeof(len))))
-        {
-            qDebug() << "Failed to consume len";
-            continue;
+            if (!m_running.load(std::memory_order_acquire))
+                break;
+
+            uint32_t len = 0;
+            if (!m_reciver.consume_block(std::span<uint8_t>(reinterpret_cast<uint8_t *>(&len), sizeof(len))))
+            {
+                qDebug() << "Failed to consume len";
+                continue;
+            }
+            if (len == 0 || len > BUFFER_CAPACITY - sizeof(len))
+            {
+                qWarning() << "Invalid IPC message length:" << len;
+                break;
+            }
+            buff.resize(len);
+            if (!m_reciver.consume_block(std::span<uint8_t>(buff.data(), len)))
+            {
+                qDebug() << "Failed to consume data";
+                continue;
+            }
+            flatbuffers::Verifier verifier(buff.data(), buff.size());
+            if (!VerifyCommandEnvelopeBuffer(verifier))
+            {
+                qWarning() << "Invalid FlatBuffer message";
+                continue;
+            }
+            auto msg_data = std::make_shared<std::vector<uint8_t>>(buff);
+            QMetaObject::invokeMethod(
+                this,
+                [this, msg_data]() {
+                    HandleMessage(GetCommandEnvelope(msg_data->data()));
+                },
+                Qt::QueuedConnection);
         }
-        if (len == 0 || len > BUFFER_CAPACITY - sizeof(len))
-        {
-            qWarning() << "Invalid IPC message length:" << len;
-            break;
-        }
-        buff.resize(len);
-        if (!m_reciver.consume_block(std::span<uint8_t>(buff.data(), len)))
-        {
-            qDebug() << "Failed to consume data";
-            continue;
-        }
-        flatbuffers::Verifier verifier(buff.data(), buff.size());
-        if (!VerifyCommandEnvelopeBuffer(verifier))
-        {
-            qWarning() << "Invalid FlatBuffer message";
-            continue;
-        }
-        auto msg_data = std::make_shared<std::vector<uint8_t>>(buff);
-        QMetaObject::invokeMethod(
-            this,
-            [this, msg_data]() {
-                HandleMessage(GetCommandEnvelope(msg_data->data()));
-            },
-            Qt::QueuedConnection);
     }
-
-    return;
+    catch (const std::exception &error)
+    {
+        qCritical() << "IPC receiver thread failed:" << error.what();
+    }
+    catch (...)
+    {
+        qCritical() << "IPC receiver thread failed with an unknown error";
+    }
 }
 
 void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
@@ -309,7 +317,7 @@ void MainWindow::on_windowSelectorOpened()
 
 void MainWindow::on_hookButton_clicked()
 {
-    std::scoped_lock lck(m_hook_mutex);
+    std::unique_lock lck(m_hook_mutex);
     if (!m_injector.isHooked())
     {
         std::wstring windowName = ui->windowSelectorCombo->currentText().toStdWString();
@@ -330,17 +338,30 @@ void MainWindow::on_hookButton_clicked()
             ui->hookButton->setText("Unhook");
             m_hooked = true;
             m_unhookPending = false;
+            m_hookStopAcknowledged = false;
             m_hook_cv.notify_all();
             ui->dumpButton->setEnabled(true);
         } 
         else {
             qDebug() << "Hook is not injected " << windowName;
+            if (m_injector.isHooked())
+            {
+                m_hookStopAcknowledged = true;
+                ui->hookButton->setText("Retry Cleanup");
+            }
         }
     }
     else
     {
         if (m_unhookPending)
             return;
+
+        if (m_hookStopAcknowledged)
+        {
+            lck.unlock();
+            finishUnhook();
+            return;
+        }
 
         m_unhookPending = true;
         ui->hookButton->setEnabled(false);
@@ -353,6 +374,7 @@ void MainWindow::on_hookButton_clicked()
                     ui->hookButton->setEnabled(true);
                     return;
                 }
+                m_hookStopAcknowledged = true;
                 finishUnhook();
             },
             Interface::CommandID_STOP, Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
@@ -375,9 +397,17 @@ void MainWindow::finishUnhook()
 
     m_sender.close();
     m_reciver.close();
-    m_injector.unhook();
+    if (!m_injector.unhook())
+    {
+        m_unhookPending = false;
+        ui->hookButton->setText("Retry Unhook");
+        ui->hookButton->setEnabled(true);
+        qWarning() << "Failed to remove hook";
+        return;
+    }
 
     m_unhookPending = false;
+    m_hookStopAcknowledged = false;
     ui->dumpButton->setEnabled(false);
     ui->hookButton->setText("Inject Hook");
     ui->hookButton->setEnabled(true);
