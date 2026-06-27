@@ -34,18 +34,31 @@ void report_boundary_error(Logger *logger, const char *boundary, const char *det
     else
         Logger::emergency_to_default(boundary, details);
 }
+
+std::string output_root()
+{
+    std::array<char, MAX_PATH> path{};
+    const DWORD length = GetTempPathA(static_cast<DWORD>(path.size()), path.data());
+
+    std::string root;
+    if (length != 0 && length < path.size())
+        root.assign(path.data(), length);
+    else
+        root = ".\\";
+
+    if (!root.empty() && root.back() != '\\' && root.back() != '/')
+        root.push_back('\\');
+    root += "HackHook\\";
+
+    CreateDirectoryA(root.c_str(), nullptr);
+
+    return root;
+}
 } // namespace
 
 MyHook::MyHook(): allocate_size(128 * 1024 * 1024), m_pmrPoolMem(VirtualAlloc(nullptr, allocate_size,
                                 MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)), m_monotonicPool(m_pmrPoolMem, allocate_size), m_pool(&m_monotonicPool)
 {
-    // std::string folderName = g_params.logDumpLocation + "dump_" + GetTimestamp() + "\\";
-    // g_params.logDumpLocation = folderName + "\\";
-    // CreateDirectory(folderName.c_str(), nullptr);
-    // g_log.init();
-
-    // m_pmrPool = std::pmr::monotonic_buffer_resource(m_pmrPoolMem, allocate_size);
-    // std::pmr::synchronized_pool_resource pool(&m_pmrPool);
 }
 
 MyHook::~MyHook() noexcept
@@ -103,9 +116,8 @@ void MyHook::start() noexcept
         m_sender.init(BUFFER_NAME_RX, false);
         m_running.store(true, std::memory_order_release);
 
-        std::string folderName = g_params.logDumpLocation + "dump_" + Logger::GetTimestamp() + "\\";
-        g_params.logDumpLocation = folderName + "\\";
-        CreateDirectory(folderName.c_str(), nullptr);
+        g_params.logDumpLocation = output_root() + "dump_" + Logger::GetTimestamp() + "\\";
+        CreateDirectoryA(g_params.logDumpLocation.c_str(), nullptr);
         m_log.init(g_params.logDumpLocation + "log.txt");
 
         HANDLE worker = CreateThread(nullptr, 0, &MyHook::ThreadWrapperMsg, this, 0, nullptr);
@@ -192,6 +204,8 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
         if (!cmd)
         {
             LOG(m_log, "WRITE command: invalid payload");
+            m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_NACK,
+                                  Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
             break;
         }
 
@@ -211,18 +225,18 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
         if (!m_memTool)
         {
             LOG(m_log, "m_memTool is not created");
+            m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_NACK,
+                                  Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
             break;
         }
 
-        bool ok = m_memTool->write(offset, data->data(), size);
+        const bool ok = m_memTool->write(offset, data->data(), size);
 
         if (!ok)
-        {
             LOG(m_log, "WRITE failed");
-        }
 
-        m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE,
-                              Interface::CreateEmptyCommand);
+        const auto response = ok ? Interface::CommandID::CommandID_ACK : Interface::CommandID::CommandID_NACK;
+        m_sender.send_command(msg->request_id(), response, Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
 
         break;
     }

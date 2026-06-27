@@ -29,8 +29,7 @@ class MyHook
 
     struct HookParams
     {
-      // TODO get logDumpLocation from injector
-        std::string logDumpLocation = "C:\\Users\\Alex\\Documents\\";
+        std::string logDumpLocation;
     } g_params;
 
     std::atomic<bool> m_running = true;
