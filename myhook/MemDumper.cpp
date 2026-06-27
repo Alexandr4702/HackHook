@@ -63,19 +63,27 @@ std::unordered_map<LPVOID, ModuleInfo> BuildModuleMap(HANDLE hProcess, MemTool &
 {
     std::unordered_map<LPVOID, ModuleInfo> moduleMap;
 
-    HMODULE modules[1024];
-    DWORD cbNeeded;
-    if (!EnumProcessModulesEx(hProcess, modules, sizeof(modules), &cbNeeded, LIST_MODULES_ALL))
-        return moduleMap;
+    std::vector<HMODULE> modules(256);
+    DWORD cbNeeded = 0;
+    while (true)
+    {
+        const DWORD bufferSize = static_cast<DWORD>(modules.size() * sizeof(HMODULE));
+        if (!EnumProcessModulesEx(hProcess, modules.data(), bufferSize, &cbNeeded, LIST_MODULES_ALL))
+            return moduleMap;
 
-    size_t moduleCount = cbNeeded / sizeof(HMODULE);
+        if (cbNeeded <= bufferSize)
+            break;
 
-    for (size_t i = 0; i < moduleCount; ++i)
+        modules.resize((cbNeeded + sizeof(HMODULE) - 1) / sizeof(HMODULE));
+    }
+    modules.resize(cbNeeded / sizeof(HMODULE));
+
+    for (HMODULE module : modules)
     {
         char moduleName[MAX_PATH] = {};
-        LPVOID baseAddress = modules[i];
+        LPVOID baseAddress = module;
 
-        if (!GetModuleFileNameExA(hProcess, modules[i], moduleName, MAX_PATH))
+        if (!GetModuleFileNameExA(hProcess, module, moduleName, MAX_PATH))
             continue;
 
         IMAGE_DOS_HEADER dosHeader;
