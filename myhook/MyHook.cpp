@@ -22,6 +22,7 @@
 #include "interface_generated.h"
 
 void SendKeyToWindow(HWND hWnd, char key);
+extern "C" __declspec(dllexport) LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam);
 
 MyHook::MyHook(): allocate_size(128 * 1024 * 1024), m_pmrPoolMem(VirtualAlloc(nullptr, allocate_size,
                                 MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)), m_monotonicPool(m_pmrPoolMem, allocate_size), m_pool(&m_monotonicPool)
@@ -37,7 +38,6 @@ MyHook::MyHook(): allocate_size(128 * 1024 * 1024), m_pmrPoolMem(VirtualAlloc(nu
 
 MyHook::~MyHook()
 {
-    stop();
     LOG(m_log, "MyHook Destroyed");
 
     m_pool.release();
@@ -52,8 +52,18 @@ MyHook::~MyHook()
 
 void MyHook::start()
 {
+    if (m_stopping.load(std::memory_order_acquire))
+        return;
+
     if (m_threadStarted.exchange(true))
         return;
+
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                            reinterpret_cast<LPCSTR>(&HookProc), &m_moduleRef))
+    {
+        m_threadStarted.store(false, std::memory_order_release);
+        return;
+    }
 
     m_memTool.emplace();
     m_reciver.init(BUFFER_NAME_TX, BUFFER_CAPACITY, false);
@@ -65,7 +75,21 @@ void MyHook::start()
     CreateDirectory(folderName.c_str(), nullptr);
     m_log.init(g_params.logDumpLocation + "log.txt");
 
-    m_threadsHandler.emplace_back(&MyHook::ThreadWrapperMsg, this);
+    HANDLE worker = CreateThread(nullptr, 0, &MyHook::ThreadWrapperMsg, this, 0, nullptr);
+    if (!worker)
+    {
+        m_running.store(false, std::memory_order_release);
+        m_threadStarted.store(false, std::memory_order_release);
+        m_memTool.reset();
+        m_reciver.close();
+        m_sender.close();
+
+        HMODULE module = std::exchange(m_moduleRef, nullptr);
+        if (module)
+            FreeLibrary(module);
+        return;
+    }
+    CloseHandle(worker);
 }
 
 void MyHook::stop()
@@ -73,17 +97,30 @@ void MyHook::stop()
     if (!m_threadStarted.exchange(false))
         return;
 
+    m_stopping.store(true, std::memory_order_release);
     m_running.store(false, std::memory_order_release);
     m_reciver.close();
     m_sender.close();
-    m_threadsHandler.clear();
-    m_memTool.reset();
     LOG(m_log, "MyHook Stopped");
 }
 
 DWORD WINAPI MyHook::ThreadWrapperMsg(LPVOID param)
 {
-    return static_cast<MyHook *>(param)->MsgConsumerThread();
+    auto *self = static_cast<MyHook *>(param);
+    const DWORD result = self->MsgConsumerThread();
+
+    self->m_running.store(false, std::memory_order_release);
+    self->m_threadStarted.store(false, std::memory_order_release);
+    self->m_reciver.close();
+    if (!self->m_stopping.load(std::memory_order_acquire))
+        self->m_sender.close();
+    self->m_memTool.reset();
+
+    HMODULE module = std::exchange(self->m_moduleRef, nullptr);
+    if (module)
+        FreeLibraryAndExitThread(module, result);
+
+    return result;
 }
 
 void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
@@ -240,6 +277,13 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
                               Interface::CreateEmptyCommand);
         break;
     }
+    case Interface::CommandID_STOP: {
+        m_stopping.store(true, std::memory_order_release);
+        m_running.store(false, std::memory_order_release);
+        m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_ACK,
+                              Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+        break;
+    }
     default:
         break;
     }
@@ -314,10 +358,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
     if (reason == DLL_PROCESS_ATTACH)
     {
         DisableThreadLibraryCalls(hModule);
-    }
-    else if (reason == DLL_PROCESS_DETACH)
-    {
-        MyHook::getInstance().stop();
     }
     return TRUE;
 }

@@ -13,6 +13,7 @@ enum CommandID : byte {
   PRESS_KEY,
   ACK,
   NACK,
+  STOP,
 }
 
 enum ValueType : byte {

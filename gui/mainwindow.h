@@ -49,6 +49,7 @@ class MainWindow : public QMainWindow
     void printOccurences(const MemoryCache &occurences);
     void refreshCachedRegions(std::function<void()> done);
     void filterOccurrences(std::span<const uint8_t> value, Interface::ValueType type);
+    void finishUnhook();
 
     class RpcClient
     {
@@ -114,6 +115,7 @@ class MainWindow : public QMainWindow
     RpcClient m_rpc_client;
     MemoryCache m_occur_storage;
     bool m_hooked = false;
+    bool m_unhookPending = false;
     std::mutex m_hook_mutex;
     std::condition_variable m_hook_cv;
 };

@@ -327,6 +327,7 @@ void MainWindow::on_hookButton_clicked()
             m_sender.reset();
             m_reciver.reset();
             m_hooked = true;
+            m_unhookPending = false;
             m_hook_cv.notify_all();
             ui->dumpButton->setEnabled(true);
         } 
@@ -336,18 +337,56 @@ void MainWindow::on_hookButton_clicked()
     }
     else
     {
-        m_sender.close();
-        m_reciver.reset();
-        m_hooked = false;
-        m_injector.unhook();
-        ui->dumpButton->setEnabled(false);
-        qDebug() << "unooked";
-        ui->hookButton->setText("Inject Hook");
+        if (m_unhookPending)
+            return;
+
+        m_unhookPending = true;
+        ui->hookButton->setEnabled(false);
+
+        const bool sent = m_rpc_client.send_rpc_cb(
+            [this](const Interface::CommandEnvelope *msg) {
+                if (!msg || msg->id() != Interface::CommandID_ACK)
+                {
+                    m_unhookPending = false;
+                    ui->hookButton->setEnabled(true);
+                    return;
+                }
+                finishUnhook();
+            },
+            Interface::CommandID_STOP, Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+
+        if (!sent)
+        {
+            m_unhookPending = false;
+            ui->hookButton->setEnabled(true);
+        }
     }
+}
+
+void MainWindow::finishUnhook()
+{
+    {
+        std::scoped_lock lock(m_hook_mutex);
+        m_hooked = false;
+        m_hook_cv.notify_all();
+    }
+
+    m_sender.close();
+    m_reciver.close();
+    m_injector.unhook();
+
+    m_unhookPending = false;
+    ui->dumpButton->setEnabled(false);
+    ui->hookButton->setText("Inject Hook");
+    ui->hookButton->setEnabled(true);
+    qDebug() << "unhooked";
 }
 
 void MainWindow::on_dumpButton_clicked()
 {
+    if (m_unhookPending || !m_injector.isHooked())
+        return;
+
     qDebug() << "Dump button clicked";
     using namespace Interface;
 
@@ -357,7 +396,7 @@ void MainWindow::on_dumpButton_clicked()
 void MainWindow::on_firstScanButton_clicked()
 {
     using namespace Interface;
-    if (!m_injector.isHooked())
+    if (m_unhookPending || !m_injector.isHooked())
     {
         return;
     }
@@ -384,7 +423,7 @@ void MainWindow::on_firstScanButton_clicked()
 
 void MainWindow::on_nextScanButton_clicked()
 {
-    if (!m_injector.isHooked())
+    if (m_unhookPending || !m_injector.isHooked())
     {
         return;
     }
@@ -494,7 +533,7 @@ void MainWindow::filterOccurrences(std::span<const uint8_t> value, Interface::Va
 
 void MainWindow::on_pressKeyButton_clicked()
 {
-    if (!m_injector.isHooked())
+    if (m_unhookPending || !m_injector.isHooked())
     {
         return;
     }

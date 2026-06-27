@@ -4,8 +4,6 @@
 #include "common/common.h"
 #include "common/utility.h"
 #include <atomic>
-#include <vector>
-#include <thread>
 #include "MemoryScanner.h"
 
 #include <memory_resource>
@@ -35,9 +33,10 @@ class MyHook
         std::string logDumpLocation = "C:\\Users\\Alex\\Documents\\";
     } g_params;
 
-    std::vector<std::jthread> m_threadsHandler;
     std::atomic<bool> m_running = true;
     std::atomic<bool> m_threadStarted = false;
+    std::atomic<bool> m_stopping = false;
+    HMODULE m_moduleRef = nullptr;
     HWND m_targetHwnd = nullptr;
     MessageIPCSender m_sender;
     SharedBuffer m_reciver;
