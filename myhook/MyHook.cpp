@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <array>
 #include <exception>
+#include <memory>
 #include <utility>
 #include <vector>
 #include <unordered_map>
@@ -89,7 +90,8 @@ void MyHook::start() noexcept
     if (m_threadStarted.exchange(true))
         return;
 
-    auto cleanup_failed_start = [this]() noexcept {
+    HMODULE module = nullptr;
+    auto cleanup_failed_start = [this, &module]() noexcept {
         m_stopping.store(true, std::memory_order_release);
         m_running.store(false, std::memory_order_release);
         m_threadStarted.store(false, std::memory_order_release);
@@ -97,15 +99,15 @@ void MyHook::start() noexcept
         try { m_reciver.close(); } catch (...) {}
         try { m_sender.close(); } catch (...) {}
 
-        HMODULE module = std::exchange(m_moduleRef, nullptr);
-        if (module)
-            FreeLibrary(module);
+        HMODULE owned_module = std::exchange(module, nullptr);
+        if (owned_module)
+            FreeLibrary(owned_module);
     };
 
     try
     {
         if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-                                reinterpret_cast<LPCSTR>(&HookProc), &m_moduleRef))
+                                reinterpret_cast<LPCSTR>(&HookProc), &module))
         {
             cleanup_failed_start();
             return;
@@ -120,12 +122,17 @@ void MyHook::start() noexcept
         CreateDirectoryA(g_params.logDumpLocation.c_str(), nullptr);
         m_log.init(g_params.logDumpLocation + "log.txt");
 
-        HANDLE worker = CreateThread(nullptr, 0, &MyHook::ThreadWrapperMsg, this, 0, nullptr);
+        auto context = std::make_unique<WorkerContext>(WorkerContext{this, module});
+        WorkerContext *raw_context = context.release();
+        HANDLE worker = CreateThread(nullptr, 0, &MyHook::ThreadWrapperMsg, raw_context, 0, nullptr);
         if (!worker)
         {
+            context.reset(raw_context);
             cleanup_failed_start();
             return;
         }
+
+        module = nullptr; // WorkerContext now owns this module reference.
         CloseHandle(worker);
     }
     catch (const std::exception &error)
@@ -154,7 +161,14 @@ void MyHook::stop()
 
 DWORD WINAPI MyHook::ThreadWrapperMsg(LPVOID param) noexcept
 {
-    auto *self = static_cast<MyHook *>(param);
+    std::unique_ptr<WorkerContext> context(static_cast<WorkerContext *>(param));
+    if (!context)
+        return ERROR_INVALID_PARAMETER;
+
+    auto *self = context->hook;
+    HMODULE module = context->module;
+    context.reset();
+
     DWORD result = ERROR_SUCCESS;
     try
     {
@@ -172,7 +186,6 @@ DWORD WINAPI MyHook::ThreadWrapperMsg(LPVOID param) noexcept
     }
 
     self->m_running.store(false, std::memory_order_release);
-    self->m_threadStarted.store(false, std::memory_order_release);
     try { self->m_reciver.close(); } catch (...) { report_boundary_error(&self->m_log, "ThreadWrapperMsg receiver cleanup"); }
     try
     {
@@ -184,8 +197,8 @@ DWORD WINAPI MyHook::ThreadWrapperMsg(LPVOID param) noexcept
         report_boundary_error(&self->m_log, "ThreadWrapperMsg sender cleanup");
     }
     try { self->m_memTool.reset(); } catch (...) { report_boundary_error(&self->m_log, "ThreadWrapperMsg MemTool cleanup"); }
+    self->m_threadStarted.store(false, std::memory_order_release);
 
-    HMODULE module = std::exchange(self->m_moduleRef, nullptr);
     if (module)
         FreeLibraryAndExitThread(module, result);
 

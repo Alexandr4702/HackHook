@@ -32,10 +32,15 @@ class MyHook
         std::string logDumpLocation;
     } g_params;
 
+    struct WorkerContext
+    {
+        MyHook *hook;
+        HMODULE module;
+    };
+
     std::atomic<bool> m_running = true;
     std::atomic<bool> m_threadStarted = false;
     std::atomic<bool> m_stopping = false;
-    HMODULE m_moduleRef = nullptr;
     HWND m_targetHwnd = nullptr;
     MessageIPCSender m_sender;
     SharedBuffer m_reciver;
