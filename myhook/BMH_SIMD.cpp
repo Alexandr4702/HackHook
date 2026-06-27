@@ -31,78 +31,40 @@ static inline size_t find_byte_avx2(const uint8_t *data, size_t len, uint8_t b)
     return len;
 }
 
-// ----------------------------- SIMD full compare 1..64 bytes -----------------------------
-
-static inline bool simd_compare_1_64(const uint8_t *hay, const uint8_t *pat, size_t len)
+static inline bool simd_compare_16(const uint8_t *hay, const uint8_t *pat)
 {
-    // len in 1..64
-    if (len <= 16)
-    {
-        __m128i h = _mm_loadu_si128((const __m128i *)hay);
-        __m128i p = _mm_loadu_si128((const __m128i *)pat);
-        __m128i c = _mm_cmpeq_epi8(h, p);
-        uint32_t mask = (uint32_t)_mm_movemask_epi8(c);
-        uint32_t need = (uint32_t)((1ull << len) - 1ull);
-        return (mask & need) == need;
-    }
-
-    if (len <= 32)
-    {
-        __m256i h = _mm256_loadu_si256((const __m256i *)hay);
-        __m256i p = _mm256_loadu_si256((const __m256i *)pat);
-        __m256i c = _mm256_cmpeq_epi8(h, p);
-        uint32_t mask = (uint32_t)_mm256_movemask_epi8(c);
-        uint32_t need = (uint32_t)((1ull << len) - 1ull);
-        return (mask & need) == need;
-    }
-
-    // 33..64: check first 32 and then tail (1..32)
-    __m256i h0 = _mm256_loadu_si256((const __m256i *)hay);
-    __m256i p0 = _mm256_loadu_si256((const __m256i *)pat);
-    __m256i c0 = _mm256_cmpeq_epi8(h0, p0);
-    uint32_t mask0 = (uint32_t)_mm256_movemask_epi8(c0);
-    if (mask0 != 0xFFFFFFFFu)
-        return false;
-
-    size_t tail = len - 32;
-    __m256i h1 = _mm256_loadu_si256((const __m256i *)(hay + 32));
-    __m256i p1 = _mm256_loadu_si256((const __m256i *)(pat + 32));
-    __m256i c1 = _mm256_cmpeq_epi8(h1, p1);
-    uint32_t mask1 = (uint32_t)_mm256_movemask_epi8(c1);
-    uint32_t need1 = (uint32_t)((1ull << tail) - 1ull);
-    return (mask1 & need1) == need1;
+    const __m128i h = _mm_loadu_si128(reinterpret_cast<const __m128i *>(hay));
+    const __m128i p = _mm_loadu_si128(reinterpret_cast<const __m128i *>(pat));
+    return static_cast<uint32_t>(_mm_movemask_epi8(_mm_cmpeq_epi8(h, p))) == 0xFFFFu;
 }
 
-// ----------------------------- SIMD full compare for arbitrary length -----------------------------
+static inline bool simd_compare_32(const uint8_t *hay, const uint8_t *pat)
+{
+    const __m256i h = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(hay));
+    const __m256i p = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(pat));
+    return static_cast<uint32_t>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(h, p))) == 0xFFFFFFFFu;
+}
 
-// Compare hay[0..len-1] == pat[0..len-1] using AVX2 blocks for large len.
-// This function returns true only if full match. It requires that hay and pat
-// have at least len bytes accessible.
 static inline bool simd_compare_any(const uint8_t *hay, const uint8_t *pat, size_t len)
 {
-    // Fast path for small sizes reusing previous function
-    if (len <= 64)
-        return simd_compare_1_64(hay, pat, len);
+    if (len < 16)
+        return std::memcmp(hay, pat, len) == 0;
 
-    // For len > 64, compare 32-byte blocks with AVX2
+    if (len < 32)
+        return simd_compare_16(hay, pat) && simd_compare_16(hay + len - 16, pat + len - 16);
+
+    if (len < 64)
+        return simd_compare_32(hay, pat) && simd_compare_32(hay + len - 32, pat + len - 32);
+
     size_t off = 0;
-    // compare 32-byte blocks while we have >=32 bytes remaining
     while (len - off >= 32)
     {
-        __m256i h = _mm256_loadu_si256((const __m256i *)(hay + off));
-        __m256i p = _mm256_loadu_si256((const __m256i *)(pat + off));
-        __m256i c = _mm256_cmpeq_epi8(h, p);
-        uint32_t mask = (uint32_t)_mm256_movemask_epi8(c);
-        if (mask != 0xFFFFFFFFu)
+        if (!simd_compare_32(hay + off, pat + off))
             return false;
         off += 32;
     }
-    // remaining tail (1..31)
-    size_t tail = len - off;
-    if (tail == 0)
-        return true;
-    // use simd_compare_1_64 for the final tail (safe up to 64)
-    return simd_compare_1_64(hay + off, pat + off, tail);
+
+    return off == len || simd_compare_32(hay + len - 32, pat + len - 32);
 }
 
 // ----------------------------- SIMD-BMH (collect ALL matches), extended -----------------------------
