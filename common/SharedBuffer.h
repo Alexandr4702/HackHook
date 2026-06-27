@@ -13,18 +13,19 @@ class SharedBuffer
 {
 public:
     SharedBuffer() = default; 
-    ~SharedBuffer();
+    ~SharedBuffer() noexcept;
 
     bool is_initialized() const
     {
         return m_buf != nullptr;
     }
     void init(const std::string &shm_name, std::size_t capacity, bool create);
-    bool produce_block(std::span<const uint8_t> src);
-    bool consume_block(std::span<uint8_t> dest);
+    bool produce_block(std::span<const uint8_t> src) noexcept;
+    bool consume_block(std::span<uint8_t> dest) noexcept;
 
-    void close();
-    void reset();
+    void close() noexcept;
+    void reset() noexcept;
+    void release(bool close_buffer = true) noexcept;
 
     inline void *get_shared_buffer_pointer()
     {return start_segment_ptr;}

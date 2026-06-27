@@ -137,31 +137,52 @@ void MessageIPCSender::init(const std::string &shm_name, bool create)
     m_sharedBufferTx.init(shm_name, BUFFER_CAPACITY, create);
 }
 
-MessageIPCSender::~MessageIPCSender()
+MessageIPCSender::~MessageIPCSender() noexcept
+{
+    release();
+}
+
+bool MessageIPCSender::send(std::span<const uint8_t> bytes) noexcept
+{
+    try
+    {
+        if (!m_sharedBufferTx.is_initialized()) return false;
+        std::scoped_lock lck(m_mutex);
+        uint32_t len = bytes.size();
+        m_buffer.resize(len + sizeof(len));
+        std::memcpy(m_buffer.data(), &len, sizeof(len));
+        std::copy(bytes.begin(), bytes.end(), m_buffer.begin() + sizeof(len));
+
+        return m_sharedBufferTx.produce_block(m_buffer);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+void MessageIPCSender::close() noexcept
 {
     m_sharedBufferTx.close();
 }
 
-bool MessageIPCSender::send(std::span<const uint8_t> bytes)
-{
-    if (!m_sharedBufferTx.is_initialized()) return false;
-    std::scoped_lock lck(m_mutex);
-    uint32_t len = bytes.size();
-    m_buffer.resize(len + sizeof(len));
-    std::memcpy(m_buffer.data(), &len, sizeof(len));
-    std::copy(bytes.begin(), bytes.end(), m_buffer.begin() + sizeof(len));
-
-    return m_sharedBufferTx.produce_block(m_buffer);
-}
-
-void MessageIPCSender::close()
-{
-    m_sharedBufferTx.close();
-}
-
-void MessageIPCSender::reset()
+void MessageIPCSender::reset() noexcept
 {
     m_sharedBufferTx.reset();
+}
+
+void MessageIPCSender::release(bool close_buffer) noexcept
+{
+    try
+    {
+        std::scoped_lock lock(m_mutex);
+        m_sharedBufferTx.release(close_buffer);
+        m_builder.Reset();
+        std::vector<uint8_t>{}.swap(m_buffer);
+    }
+    catch (...)
+    {
+    }
 }
 
 std::string valueToString(std::span<const uint8_t> data,

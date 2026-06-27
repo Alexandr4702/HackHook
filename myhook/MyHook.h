@@ -11,11 +11,7 @@
 class MyHook
 {
   public:
-    static MyHook &getInstance()
-    {
-        static MyHook instance;
-        return instance;
-    }
+    static MyHook &getInstance();
     MyHook();
     ~MyHook() noexcept;
 
@@ -48,6 +44,8 @@ class MyHook
 
     std::atomic<bool> m_running = false;
     std::atomic<State> m_state = State::Stopped;
+    std::atomic<bool> m_shutdown = false;
+    std::atomic<bool> m_stopAcknowledged = false;
     HWND m_targetHwnd = nullptr;
     MessageIPCSender m_sender;
     SharedBuffer m_reciver;
@@ -59,6 +57,7 @@ class MyHook
     std::pmr::synchronized_pool_resource m_pool;
 
     void HandleMessage(const Interface::CommandEnvelope *msg);
+    void shutdown() noexcept;
 
     DWORD MsgConsumerThread();
 

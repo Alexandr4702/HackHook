@@ -57,6 +57,13 @@ std::string output_root()
 }
 } // namespace
 
+MyHook &MyHook::getInstance()
+{
+    alignas(MyHook) static std::byte storage[sizeof(MyHook)];
+    static MyHook *instance = std::construct_at(reinterpret_cast<MyHook *>(storage));
+    return *instance;
+}
+
 MyHook::MyHook(): allocate_size(128 * 1024 * 1024), m_pmrPoolMem(VirtualAlloc(nullptr, allocate_size,
                                 MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)), m_monotonicPool(m_pmrPoolMem, allocate_size), m_pool(&m_monotonicPool)
 {
@@ -64,22 +71,39 @@ MyHook::MyHook(): allocate_size(128 * 1024 * 1024), m_pmrPoolMem(VirtualAlloc(nu
 
 MyHook::~MyHook() noexcept
 {
+    shutdown();
+}
+
+void MyHook::shutdown() noexcept
+{
+    if (m_shutdown.exchange(true, std::memory_order_acq_rel))
+        return;
+
+    try { m_memTool.reset(); } catch (...) { report_boundary_error(&m_log, "MyHook::shutdown MemTool"); }
+    try { m_reciver.release(); } catch (...) { report_boundary_error(&m_log, "MyHook::shutdown receiver"); }
+    try { m_sender.release(!m_stopAcknowledged.load(std::memory_order_acquire)); }
+    catch (...) { report_boundary_error(&m_log, "MyHook::shutdown sender"); }
+
     try
     {
-        LOG(m_log, "MyHook Destroyed");
         m_pool.release();
         m_monotonicPool.release();
-
-        if (m_pmrPoolMem)
-        {
-            VirtualFree(m_pmrPoolMem, 0, MEM_RELEASE);
-            m_pmrPoolMem = nullptr;
-        }
     }
     catch (...)
     {
-        report_boundary_error(&m_log, "MyHook::~MyHook");
+        report_boundary_error(&m_log, "MyHook::shutdown pools");
     }
+
+    if (m_pmrPoolMem)
+    {
+        VirtualFree(m_pmrPoolMem, 0, MEM_RELEASE);
+        m_pmrPoolMem = nullptr;
+    }
+
+    std::string{}.swap(g_params.logDumpLocation);
+    try { LOG(m_log, "MyHook stopped and resources released"); }
+    catch (...) { report_boundary_error(&m_log, "MyHook::shutdown log"); }
+    m_log.close();
 }
 
 void MyHook::start() noexcept
@@ -92,9 +116,7 @@ void MyHook::start() noexcept
     auto cleanup_failed_start = [this, &module]() noexcept {
         m_state.store(State::Stopping, std::memory_order_release);
         m_running.store(false, std::memory_order_release);
-        try { m_memTool.reset(); } catch (...) {}
-        try { m_reciver.close(); } catch (...) {}
-        try { m_sender.close(); } catch (...) {}
+        shutdown();
 
         HMODULE owned_module = std::exchange(module, nullptr);
         if (owned_module)
@@ -184,18 +206,8 @@ DWORD WINAPI MyHook::ThreadWrapperMsg(LPVOID param) noexcept
     }
 
     self->m_running.store(false, std::memory_order_release);
-    const State previous_state = self->m_state.exchange(State::Stopping, std::memory_order_acq_rel);
-    try { self->m_reciver.close(); } catch (...) { report_boundary_error(&self->m_log, "ThreadWrapperMsg receiver cleanup"); }
-    try
-    {
-        if (previous_state != State::Stopping)
-            self->m_sender.close();
-    }
-    catch (...)
-    {
-        report_boundary_error(&self->m_log, "ThreadWrapperMsg sender cleanup");
-    }
-    try { self->m_memTool.reset(); } catch (...) { report_boundary_error(&self->m_log, "ThreadWrapperMsg MemTool cleanup"); }
+    self->m_state.store(State::Stopping, std::memory_order_release);
+    self->shutdown();
 
     if (module)
         FreeLibraryAndExitThread(module, result);
@@ -368,8 +380,10 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
     case Interface::CommandID_STOP: {
         m_state.store(State::Stopping, std::memory_order_release);
         m_running.store(false, std::memory_order_release);
-        m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_ACK,
-                              Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+        const bool acknowledged = m_sender.send_command(
+            msg->request_id(), Interface::CommandID::CommandID_ACK,
+            Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+        m_stopAcknowledged.store(acknowledged, std::memory_order_release);
         break;
     }
     default:
