@@ -8,20 +8,8 @@
 #include <memory_resource>
 #include <processthreadsapi.h>
 
+#include "FoundOccurrences.h"
 #include "MyHookImport.h"
-
-struct FoundOccurrences
-{
-    uint64_t baseAddress;
-    uint64_t offset;
-    uint64_t region_size;
-    uint64_t data_size;
-    int32_t type;
-    auto operator<=>(const FoundOccurrences& b) const noexcept
-    {
-        return (baseAddress + offset) <=> (b.baseAddress + b.offset);
-    }
-};
 
 struct Region
 {

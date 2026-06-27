@@ -271,20 +271,15 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
         qDebug() << std::format(L"CommandID_FIND_ACK recived found {} occurrences ", occurrences->size());
         for(auto occur: *occurrences)
         {
-            FoundOccurrences found;
-            found.baseAddress = occur->base_address();
-            found.offset = occur->offset();
-            found.region_size = occur->region_size();
-            found.data_size = occur->data_size();
-            found.type = occur->type();
+            FoundOccurrences found{
+                .baseAddress = occur->base_address(),
+                .offset = occur->offset(),
+                .region_size = occur->region_size(),
+                .data_size = occur->data_size(),
+                .type = occur->type(),
+            };
 
-            auto base = occur->base_address() + occur->offset();
-            auto size =  occur->data_size();
-            auto type = static_cast<Interface::ValueType>(occur->type());
-
-            MemoryCache::View v{.range = {base, size}, .type = type};
-
-            m_occur_storage.put(data, std::move(v));
+            m_occur_storage.put(data, MemoryCache::View{found});
         }
         printOccurences(m_occur_storage);
         break;
@@ -574,7 +569,7 @@ void MainWindow::filterOccurrences(std::span<const uint8_t> value, Interface::Va
     {
         auto cached_data = m_occur_storage.data(view.range);
         const bool matches =
-            view.type == type && cached_data && cached_data->size() >= value.size() &&
+            view.type() == type && cached_data && cached_data->size() >= value.size() &&
             std::ranges::equal(value, std::span<const uint8_t>(cached_data->data(), value.size()));
 
         if (!matches)
@@ -615,23 +610,19 @@ void MainWindow::printOccurences(const MemoryCache &occurences)
         if (!data)
             continue;
 
-        auto region_it = std::ranges::find_if(occurences.regions(), [&view](const MemoryCache::Region &region) {
-            return region.range.contains(view.range);
-        });
-
-        const uint64_t region_base = region_it != occurences.regions().end() ? region_it->range.base : view.range.base;
-        const size_t region_size = region_it != occurences.regions().end() ? region_it->range.size : view.range.size;
-        const uint64_t region_offset = view.range.base - region_base;
-        const auto type_index = static_cast<size_t>(view.type);
+        const auto &occur = view.occurrence;
+        const auto value_type = view.type();
+        const auto type_index = static_cast<size_t>(value_type);
         const char *type_text = type_index < valueTypes.size() ? valueTypes[type_index].first : "Unknown";
 
-        const auto value_text = valueToString(*data, view.type);
+        const auto value_text = valueToString(*data, value_type);
         table->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(value_text)));
-        table->setItem(row, 1, new QTableWidgetItem(QString("0x%1").arg(view.range.base, 0, 16)));
-        table->setItem(row, 2, new QTableWidgetItem(QString("0x%1").arg(region_base, 0, 16)));
-        table->setItem(row, 3, new QTableWidgetItem(QString::number(region_offset)));
-        table->setItem(row, 4, new QTableWidgetItem(QString::number(region_size)));
-        table->setItem(row, 5, new QTableWidgetItem(QString::number(view.range.size)));
+        table->setItem(row, 1,
+                       new QTableWidgetItem(QString("0x%1").arg(occur.baseAddress + occur.offset, 0, 16)));
+        table->setItem(row, 2, new QTableWidgetItem(QString("0x%1").arg(occur.baseAddress, 0, 16)));
+        table->setItem(row, 3, new QTableWidgetItem(QString::number(occur.offset)));
+        table->setItem(row, 4, new QTableWidgetItem(QString::number(occur.region_size)));
+        table->setItem(row, 5, new QTableWidgetItem(QString::number(occur.data_size)));
         table->setItem(row, 6, new QTableWidgetItem(QString::fromUtf8(type_text)));
         table->setItem(row, 7, new QTableWidgetItem{});
         ++row;
