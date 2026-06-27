@@ -19,6 +19,7 @@ namespace
 {
 // Jmp point for veh fail
 thread_local jmp_buf g_jump;
+thread_local volatile bool g_jump_armed = false;
 
 std::vector<MEMORY_BASIC_INFORMATION> enum_regions()
 {
@@ -59,8 +60,9 @@ Region GetMyDllRegion()
 
 LONG CALLBACK veh_handler(EXCEPTION_POINTERS *e)
 {
-    if (e->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
+    if (e->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && g_jump_armed)
     {
+        g_jump_armed = false;
         longjmp(g_jump, 1);
     }
 
@@ -127,6 +129,7 @@ std::pmr::vector<FoundOccurrences> MemTool::find(std::span<const uint8_t> patter
             {
                 continue;
             }
+            g_jump_armed = true;
 
             // std::vector<size_t> matches = find_all(
             //     std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(region.BaseAddress), region.RegionSize),
@@ -134,6 +137,7 @@ std::pmr::vector<FoundOccurrences> MemTool::find(std::span<const uint8_t> patter
 
             std::vector<size_t> matches = bmh_simd_avx2_all_extended(
                 reinterpret_cast<const uint8_t *>(region.BaseAddress), region.RegionSize, searcher_Avx2);
+            g_jump_armed = false;
 
             for (auto &match : matches)
             {
@@ -243,7 +247,9 @@ size_t MemTool::read(uintptr_t address, void* out, size_t size)
         if (setjmp(g_jump) != 0)
             break;
 
+        g_jump_armed = true;
         std::memcpy(dst, src, chunk);
+        g_jump_armed = false;
 
         totalRead += chunk;
         src += chunk;
@@ -255,7 +261,10 @@ size_t MemTool::read(uintptr_t address, void* out, size_t size)
 
 bool MemTool::write(uintptr_t address, const void* data, size_t size)
 {
-    MEMORY_BASIC_INFORMATION mbi;
+    if (!data || size == 0)
+        return false;
+
+    MEMORY_BASIC_INFORMATION mbi{};
 
     if (VirtualQuery(reinterpret_cast<void*>(address), &mbi, sizeof(mbi)) != sizeof(mbi))
         return false;
@@ -272,12 +281,17 @@ bool MemTool::write(uintptr_t address, const void* data, size_t size)
     if (!writable)
         return false;
 
-    if (setjmp(g_jump) != 0)
-    {
+    const auto region_start = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+    const auto region_end = region_start + mbi.RegionSize;
+    if (address < region_start || address >= region_end || size > region_end - address)
         return false;
-    }
-    ProtectGuard g((void*)address, size);
-    std::memcpy(reinterpret_cast<void*>(address), data, size);
+
+    if (setjmp(g_jump) != 0)
+        return false;
+
+    g_jump_armed = true;
+    std::memcpy(reinterpret_cast<void *>(address), data, size);
+    g_jump_armed = false;
     return true;
 }
 

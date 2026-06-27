@@ -6,6 +6,10 @@ set(CMAKE_AUTORCC ON)
 
 include_directories(.)
 
+add_library(gui_core
+    MemoryCache.cpp
+)
+
 add_executable(gui_app
     main.cpp
     mainwindow.cpp
@@ -14,8 +18,14 @@ add_executable(gui_app
     mainwindow.ui
 )
 
+target_compile_options(gui_core PRIVATE -g -O0)
+target_compile_options(gui_app PRIVATE -g -O0)
+
 target_link_libraries(gui_app
-    PRIVATE Qt6::Widgets injector common
+    PRIVATE Qt6::Widgets injector common gui_core
 )
 
+add_dependencies(gui_core generate_flatbuffers_code)
 add_dependencies(gui_app generate_flatbuffers_code)
+
+add_subdirectory(Tests)

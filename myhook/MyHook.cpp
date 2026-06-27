@@ -37,6 +37,7 @@ MyHook::MyHook(): allocate_size(128 * 1024 * 1024), m_pmrPoolMem(VirtualAlloc(nu
 
 MyHook::~MyHook()
 {
+    stop();
     LOG(m_log, "MyHook Destroyed");
 
     m_pool.release();
@@ -58,19 +59,26 @@ void MyHook::start()
     m_reciver.init(BUFFER_NAME_TX, BUFFER_CAPACITY, false);
     m_sender.init(BUFFER_NAME_RX, false);
     m_running.store(true, std::memory_order_release);
-    CreateThread(nullptr, 0, &MyHook::ThreadWrapperCreator, this, 0, nullptr);
+
+    std::string folderName = g_params.logDumpLocation + "dump_" + Logger::GetTimestamp() + "\\";
+    g_params.logDumpLocation = folderName + "\\";
+    CreateDirectory(folderName.c_str(), nullptr);
+    m_log.init(g_params.logDumpLocation + "log.txt");
+
+    m_threadsHandler.emplace_back(&MyHook::ThreadWrapperMsg, this);
 }
 
 void MyHook::stop()
 {
-    m_memTool.reset();
-    m_running.store(false, std::memory_order_release);
-    LOG(m_log, "MyHook Stopped");
-}
+    if (!m_threadStarted.exchange(false))
+        return;
 
-DWORD WINAPI MyHook::ThreadWrapperCreator(LPVOID param)
-{
-    return static_cast<MyHook *>(param)->ThreadsCreator();
+    m_running.store(false, std::memory_order_release);
+    m_reciver.close();
+    m_sender.close();
+    m_threadsHandler.clear();
+    m_memTool.reset();
+    LOG(m_log, "MyHook Stopped");
 }
 
 DWORD WINAPI MyHook::ThreadWrapperMsg(LPVOID param)
@@ -95,6 +103,13 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
 
         const auto offset = cmd->offset();
         const auto data = cmd->data();
+        if (!data)
+        {
+            LOG(m_log, "WRITE command: missing data");
+            m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_NACK,
+                                  Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+            break;
+        }
         const auto size = data->size();
 
         LOG(m_log, std::format("Received write command with offset: {}, size: {}", offset, size));
@@ -118,7 +133,15 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
         break;
     }
     case Interface::CommandID_READ: {
-        LOG(m_log, std::format("Received read command with offset: {}", msg->body_as_ReadCommand()->offset()));
+        const auto *cmd = msg->body_as_ReadCommand();
+        if (!cmd || cmd->size() > BUFFER_CAPACITY - 1024)
+        {
+            LOG(m_log, "READ command: invalid payload or size");
+            m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_NACK,
+                                  Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+            break;
+        }
+        LOG(m_log, std::format("Received read command with offset: {}", cmd->offset()));
         if (!m_memTool)
         {
             m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_NACK,
@@ -126,8 +149,8 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
             break;
         }
 
-        std::pmr::vector<uint8_t> readed_data(msg->body_as_ReadCommand()->size(), &m_pool);
-        auto readed = m_memTool->read(msg->body_as_ReadCommand()->offset(), readed_data.data(), msg->body_as_ReadCommand()->size());
+        std::pmr::vector<uint8_t> readed_data(cmd->size(), &m_pool);
+        auto readed = m_memTool->read(cmd->offset(), readed_data.data(), cmd->size());
         auto read_ack_func = [data = std::move(readed_data), readed](flatbuffers::FlatBufferBuilder &builder) -> flatbuffers::Offset<Interface::ReadAck> {
             return Interface::CreateReadAck(builder, builder.CreateVector(data.data(), readed));
         };
@@ -146,8 +169,16 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
     case Interface::CommandID_FIND: {
         LOG(m_log, "Received CommandID_FIND command");
 
-        auto data_vector = msg->body_as_FindCommand()->data();
-        auto value_type = msg->body_as_FindCommand()->value_type();
+        const auto *cmd = msg->body_as_FindCommand();
+        const auto *data_vector = cmd ? cmd->data() : nullptr;
+        if (!cmd || !data_vector || data_vector->size() == 0)
+        {
+            LOG(m_log, "FIND command: invalid payload");
+            m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_NACK,
+                                  Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+            break;
+        }
+        auto value_type = cmd->value_type();
         std::pmr::vector<uint8_t> pattern(data_vector->data(), data_vector->data() + data_vector->size(), &m_pool);
         LOG(m_log, std::format("Pattern size: {}", pattern.size()));
 
@@ -196,8 +227,14 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
         break;
     }
     case Interface::CommandID_PRESS_KEY: {
-        const HWND hwnd = reinterpret_cast<HWND>(msg->body_as_PressKeyCommand()->hwnd());
-        const char key = msg->body_as_PressKeyCommand()->key();
+        const auto *cmd = msg->body_as_PressKeyCommand();
+        if (!cmd)
+        {
+            LOG(m_log, "PRESS_KEY command: invalid payload");
+            break;
+        }
+        const HWND hwnd = reinterpret_cast<HWND>(cmd->hwnd());
+        const char key = cmd->key();
         SendKeyToWindow(hwnd, key);
         m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE,
                               Interface::CreateEmptyCommand);
@@ -206,19 +243,6 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
     default:
         break;
     }
-}
-
-DWORD MyHook::ThreadsCreator()
-{
-    std::string folderName = g_params.logDumpLocation + "dump_" + Logger::GetTimestamp() + "\\";
-    g_params.logDumpLocation = folderName + "\\";
-    CreateDirectory(folderName.c_str(), nullptr);
-    m_log.init(g_params.logDumpLocation + "log.txt");
-
-    m_threadsHandler.emplace_back(
-        std::jthread(&MyHook::ThreadWrapperMsg, this));
-
-    return 0;
 }
 
 void SendKeyToWindow(HWND hWnd, char key)
@@ -255,9 +279,20 @@ DWORD WINAPI MyHook::MsgConsumerThread()
         std::stringstream ss;
         if (!m_reciver.consume_block(std::span<uint8_t>(reinterpret_cast<uint8_t *>(&len), sizeof(len))))
             break;
+        if (len == 0 || len > BUFFER_CAPACITY - sizeof(len))
+        {
+            LOG(m_log, std::format("Invalid IPC message length: {}", len));
+            break;
+        }
         buff.resize(len);
         if (!m_reciver.consume_block(std::span<uint8_t>(buff.data(), len)))
             break;
+        flatbuffers::Verifier verifier(buff.data(), buff.size());
+        if (!VerifyCommandEnvelopeBuffer(verifier))
+        {
+            LOG(m_log, "Invalid FlatBuffer message");
+            continue;
+        }
         HandleMessage(GetCommandEnvelope(buff.data()));
     }
 

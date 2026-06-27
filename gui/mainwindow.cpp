@@ -1,13 +1,15 @@
 #include "mainwindow.h"
+#include "MemoryCache.h"
 #include "interface_generated.h"
-#include "myhook/MemoryScanner.h"
 #include "ui_mainwindow.h"
-#include <algorithm>
+#include <QMetaObject>
+#include <QTableWidgetItem>
 #include <atomic>
+#include <charconv>
 #include <cstdint>
 #include <memory>
-#include <mutex>
-#include <qlogging.h>
+#include <span>
+#include <string_view>
 #include <thread>
 #include <vector>
 #include <windows.h>
@@ -31,37 +33,47 @@ namespace
         using namespace Interface;
 
         std::vector<uint8_t> data;
-        bool ok = true;
+        const QByteArray utf8 = text.toUtf8();
+        const std::string_view input(utf8.constData(), static_cast<size_t>(utf8.size()));
+
+        auto parse_value = [input, &data](auto &value) {
+            const auto [end, error] = std::from_chars(input.data(), input.data() + input.size(), value);
+            if (error != std::errc{} || end != input.data() + input.size())
+                return false;
+
+            const auto *bytes = reinterpret_cast<const uint8_t *>(&value);
+            data.assign(bytes, bytes + sizeof(value));
+            return true;
+        };
 
         switch (value_type)
         {
         case ValueType::ValueType_Int32: {
-            int32_t val = text.toInt(&ok);
-            uint8_t *p = reinterpret_cast<uint8_t *>(&val);
-            data.assign(p, p + sizeof(val));
+            int32_t val = 0;
+            if (!parse_value(val))
+                return {};
             break;
         }
         case ValueType::ValueType_Float: {
-            float val = text.toFloat(&ok);
-            uint8_t *p = reinterpret_cast<uint8_t *>(&val);
-            data.assign(p, p + sizeof(val));
+            float val = 0;
+            if (!parse_value(val))
+                return {};
             break;
         }
         case ValueType::ValueType_Double: {
-            double val = text.toDouble(&ok);
-            uint8_t *p = reinterpret_cast<uint8_t *>(&val);
-            data.assign(p, p + sizeof(val));
+            double val = 0;
+            if (!parse_value(val))
+                return {};
             break;
         }
         case ValueType::ValueType_Int64: {
-            qint64 val = text.toLongLong(&ok);
-            uint8_t *p = reinterpret_cast<uint8_t *>(&val);
-            data.assign(p, p + sizeof(val));
+            int64_t val = 0;
+            if (!parse_value(val))
+                return {};
             break;
         }
         case ValueType::ValueType_String: {
-            QByteArray val = text.toUtf8();
-            data.assign(val.begin(), val.end());
+            data.assign(input.begin(), input.end());
             break;
         }
         case ValueType::ValueType_String16: {
@@ -71,16 +83,21 @@ namespace
             break;
         }
         case ValueType::ValueType_ByteArray: {
-            std::string hex = text.toStdString();
+            std::string hex(input);
 
             if (hex.size() % 2 != 0)
             {
-                hex = "0" + hex;
+                hex.insert(hex.begin(), '0');
             }
             for (size_t i = 0; i < hex.size(); i += 2)
             {
-                uint8_t byte = static_cast<uint8_t>(std::stoul(hex.substr(i, 2), nullptr, 16));
-                data.push_back(byte);
+                unsigned int value = 0;
+                const char *begin = hex.data() + i;
+                const char *end = begin + 2;
+                const auto [parsed_end, error] = std::from_chars(begin, end, value, 16);
+                if (error != std::errc{} || parsed_end != end)
+                    return {};
+                data.push_back(static_cast<uint8_t>(value));
             }
             break;
         }
@@ -137,8 +154,9 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam)
     if (length == 0)
         return TRUE;
 
-    std::wstring title(length, L'\0');
-    GetWindowTextW(hwnd, &title[0], length + 1);
+    std::wstring title(length + 1, L'\0');
+    const int copied = GetWindowTextW(hwnd, title.data(), static_cast<int>(title.size()));
+    title.resize(copied);
 
     auto comboBox = reinterpret_cast<QComboBox *>(lParam);
     comboBox->addItem(QString::fromStdWString(title));
@@ -169,13 +187,30 @@ void MainWindow::MsgConsumerThread()
             qDebug() << "Failed to consume len";
             continue;
         }
+        if (len == 0 || len > BUFFER_CAPACITY - sizeof(len))
+        {
+            qWarning() << "Invalid IPC message length:" << len;
+            break;
+        }
         buff.resize(len);
         if (!m_reciver.consume_block(std::span<uint8_t>(buff.data(), len)))
         {
             qDebug() << "Failed to consume data";
             continue;
         }
-        HandleMessage(GetCommandEnvelope(buff.data()));
+        flatbuffers::Verifier verifier(buff.data(), buff.size());
+        if (!VerifyCommandEnvelopeBuffer(verifier))
+        {
+            qWarning() << "Invalid FlatBuffer message";
+            continue;
+        }
+        auto msg_data = std::make_shared<std::vector<uint8_t>>(buff);
+        QMetaObject::invokeMethod(
+            this,
+            [this, msg_data]() {
+                HandleMessage(GetCommandEnvelope(msg_data->data()));
+            },
+            Qt::QueuedConnection);
     }
 
     return;
@@ -189,18 +224,29 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
     switch (msg->id())
     {
     case Interface::CommandID_WRITE:
-        qDebug() << "[HandleMessage] Received write command with offset: " << msg->body_as_WriteCommand()->offset();
+        if (const auto *cmd = msg->body_as_WriteCommand())
+            qDebug() << "[HandleMessage] Received write command with offset: " << cmd->offset();
         break;
     case Interface::CommandID_ACK:
         qDebug() << "[HandleMessage] Received CommandID_ACK command";
+        m_rpc_client.call_cb(msg->request_id(), msg);
         break;
     case Interface::CommandID_READ_ACK:
         qDebug() << "[HandleMessage] Received CommandID_READ_ACK command";
-        m_rpc_client.call_cb(msg);
+        m_rpc_client.call_cb(msg->request_id(), msg);
+        break;
+    case Interface::CommandID_NACK:
+        qDebug() << "[HandleMessage] Received CommandID_NACK command";
+        m_rpc_client.call_cb(msg->request_id(), msg);
         break;
     case Interface::CommandID_FIND_ACK:
     {
         auto* ack = msg->body_as_FindAck();
+        if (!ack || !ack->value() || !ack->occurrences())
+        {
+            qWarning() << "Invalid FIND_ACK payload";
+            break;
+        }
         auto value = ack->value();
         auto occurrences = ack->occurrences();
         auto value_type = ack->value_type();
@@ -215,7 +261,13 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
             found.data_size = occur->data_size();
             found.type = occur->type();
 
-            m_occur_storage.put(data, std::move(found));
+            auto base = occur->base_address() + occur->offset();
+            auto size =  occur->data_size();
+            auto type = static_cast<Interface::ValueType>(occur->type());
+
+            MemoryCache::View v{.range = {base, size}, .type = type};
+
+            m_occur_storage.put(data, std::move(v));
         }
         printOccurences(m_occur_storage);
         break;
@@ -244,8 +296,9 @@ void MainWindow::on_windowSelectorOpened()
             if (length == 0)
                 return TRUE;
 
-            std::wstring title(length, L'\0');
-            GetWindowTextW(hwnd, &title[0], length + 1);
+            std::wstring title(length + 1, L'\0');
+            const int copied = GetWindowTextW(hwnd, title.data(), static_cast<int>(title.size()));
+            title.resize(copied);
 
             auto combo = reinterpret_cast<QComboBox *>(lParam);
             combo->addItem(QString::fromStdWString(title));
@@ -331,61 +384,112 @@ void MainWindow::on_firstScanButton_clicked()
 
 void MainWindow::on_nextScanButton_clicked()
 {
-    if (!m_injector.isHooked() || m_pending.load(std::memory_order::acquire) != 0)
+    if (!m_injector.isHooked())
     {
-        qDebug() << "Injector is not hooked  or " << "prevous search is not finished: " << m_pending.load();
         return;
     }
-    auto view = m_occur_storage.getFirst();
-    const auto view_size = std::ranges::distance(view);
-    if(view_size == 0)
-        return;
-
-    m_pending.store(view_size, std::memory_order::release);
-
     auto value_type = ui->valueTypeCombo->currentData().toInt();
     const auto &text = ui->valueEdit->text();
-    auto pattern_bytes = std::make_shared<std::vector<uint8_t>>(string2data(text, value_type));
+    std::vector<uint8_t> data = string2data(text, value_type);
 
-    auto erase_print = [this]() {
-        qDebug() << "invokeMethod called";
-        std::scoped_lock lck(m_to_remove_mtx);
-        for (auto &[el, occ] : to_remove)
-        {
-            m_occur_storage.erase(el, occ);
-        }
-        to_remove.clear();
-        printOccurences(m_occur_storage);
-    };
-    for (const auto &[occur, dataRef] : view)
+    if (data.empty())
     {
-        if (pattern_bytes->size() > dataRef.get().size())
-        {
-            std::scoped_lock lck(m_to_remove_mtx);
-            to_remove.emplace_back(dataRef, occur);
-            if (m_pending.fetch_sub(1, std::memory_order::acq_rel) == 1)
-                QMetaObject::invokeMethod(this, erase_print, Qt::QueuedConnection);
-            continue;
-        }
-        const auto data_el = dataRef.get();
-        auto cb = [this, pattern_bytes, data_el, occur,
-                   erase_print](const Interface::CommandEnvelope *msg) {
-            auto read_ack = msg->body_as_ReadAck();
-            auto data = read_ack->data();
-
-            if (!data || !std::equal(pattern_bytes->begin(), pattern_bytes->end(), data->begin()))
-            {
-                std::scoped_lock lck(m_to_remove_mtx);
-                to_remove.emplace_back(data_el, occur);
-            }
-            qDebug() << "Cb is called";
-            if (m_pending.fetch_sub(1, std::memory_order::acq_rel) == 1)
-                QMetaObject::invokeMethod(this, erase_print, Qt::QueuedConnection);
-        };
-        m_rpc_client.send_rpc_cb(cb, Interface::CommandID::CommandID_READ, Interface::Command::Command_ReadCommand,
-                                 Interface::CreateReadCommand, occur.baseAddress + occur.offset, pattern_bytes->size());
+        qDebug() << "Failed to parse value";
+        return;
     }
-    qDebug() << "on_nextScan_clicked";
+
+    const auto type = static_cast<Interface::ValueType>(value_type);
+    refreshCachedRegions([this, data = std::move(data), type]() {
+        filterOccurrences(data, type);
+        printOccurences(m_occur_storage);
+        qDebug() << "on_nextScan_clicked";
+    });
+}
+
+void MainWindow::refreshCachedRegions(std::function<void()> done)
+{
+    std::vector<MemoryCache::RegionRange> regions;
+    regions.reserve(m_occur_storage.regions().size());
+    for (const auto &region : m_occur_storage.regions())
+    {
+        regions.push_back(region.range);
+    }
+
+    if (regions.empty())
+    {
+        done();
+        return;
+    }
+
+    struct RefreshState
+    {
+        size_t pending = 0;
+        std::function<void()> done;
+    };
+
+    auto state = std::make_shared<RefreshState>();
+    state->pending = regions.size();
+    state->done = std::move(done);
+
+    auto finish_one = [this, state]() {
+        if (state->pending == 0)
+            return;
+
+        --state->pending;
+        if (state->pending != 0)
+            return;
+
+        if (state->done)
+            state->done();
+    };
+
+    for (const auto &range : regions)
+    {
+        const bool sent = m_rpc_client.send_rpc_cb(
+            [this, range, finish_one](const Interface::CommandEnvelope *msg) {
+                if (msg && msg->id() == Interface::CommandID_READ_ACK)
+                {
+                    const auto *ack = msg->body_as_ReadAck();
+                    const auto *read_data = ack ? ack->data() : nullptr;
+                    if (read_data && read_data->size() == range.size)
+                    {
+                        m_occur_storage.update_data(
+                            range, std::vector<uint8_t>(read_data->data(), read_data->data() + read_data->size()));
+                    }
+                }
+                finish_one();
+            },
+            Interface::CommandID_READ, Interface::Command::Command_ReadCommand, Interface::CreateReadCommand, range.base,
+            static_cast<uint64_t>(range.size));
+
+        if (!sent)
+        {
+            finish_one();
+        }
+    }
+}
+
+void MainWindow::filterOccurrences(std::span<const uint8_t> value, Interface::ValueType type)
+{
+    std::vector<MemoryCache::View> views;
+    views.reserve(m_occur_storage.views().size());
+    for (const auto &view : m_occur_storage.views())
+    {
+        views.push_back(view);
+    }
+
+    for (const auto &view : views)
+    {
+        auto cached_data = m_occur_storage.data(view.range);
+        const bool matches =
+            view.type == type && cached_data && cached_data->size() >= value.size() &&
+            std::ranges::equal(value, std::span<const uint8_t>(cached_data->data(), value.size()));
+
+        if (!matches)
+        {
+            m_occur_storage.remove_view(view);
+        }
+    }
 }
 
 void MainWindow::on_pressKeyButton_clicked()
@@ -405,30 +509,42 @@ void MainWindow::on_clearButton_clicked()
     printOccurences(m_occur_storage);
 }
 
-void MainWindow::printOccurences(const OccurrencesStorage &occurences)
+void MainWindow::printOccurences(const MemoryCache &occurences)
 {
-    auto view = occurences.getFirst();
-
     auto *table = ui->resultsTable;
+    table->setSortingEnabled(false);
+    table->clearContents();
+    table->setRowCount(static_cast<int>(occurences.views().size()));
 
-    table->setRowCount(static_cast<int>(std::ranges::distance(view)));
     int row = 0;
-
-    for (const auto &[occur, dataRef] : view)
+    for (const auto &view : occurences.views())
     {
-        const auto &data = dataRef.get();
+        auto data = occurences.data(view.range);
+        if (!data)
+            continue;
 
-        auto valStr = valueToString(std::span<const uint8_t>(data.data(), data.size()),
-                                    static_cast<Interface::ValueType>(occur.type));
+        auto region_it = std::ranges::find_if(occurences.regions(), [&view](const MemoryCache::Region &region) {
+            return region.range.contains(view.range);
+        });
 
-        table->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(valStr)));
-        table->setItem(row, 1, new QTableWidgetItem(QString("0x%1").arg(occur.baseAddress + occur.offset, 0, 16)));
-        table->setItem(row, 2, new QTableWidgetItem(QString("0x%1").arg(occur.baseAddress, 0, 16)));
-        table->setItem(row, 3, new QTableWidgetItem(QString::number(occur.offset)));
-        table->setItem(row, 4, new QTableWidgetItem(QString::number(occur.region_size)));
-        table->setItem(row, 5, new QTableWidgetItem(QString::number(occur.data_size)));
-        table->setItem(row, 6, new QTableWidgetItem(QString::fromStdString(valueTypes[occur.type].first)));
+        const uint64_t region_base = region_it != occurences.regions().end() ? region_it->range.base : view.range.base;
+        const size_t region_size = region_it != occurences.regions().end() ? region_it->range.size : view.range.size;
+        const uint64_t region_offset = view.range.base - region_base;
+        const auto type_index = static_cast<size_t>(view.type);
+        const char *type_text = type_index < valueTypes.size() ? valueTypes[type_index].first : "Unknown";
+
+        table->setItem(row, 0,
+                       new QTableWidgetItem(QString::fromStdString(valueToString(std::span<const uint8_t>(*data), view.type))));
+        table->setItem(row, 1, new QTableWidgetItem(QString("0x%1").arg(view.range.base, 0, 16)));
+        table->setItem(row, 2, new QTableWidgetItem(QString("0x%1").arg(region_base, 0, 16)));
+        table->setItem(row, 3, new QTableWidgetItem(QString::number(region_offset)));
+        table->setItem(row, 4, new QTableWidgetItem(QString::number(region_size)));
+        table->setItem(row, 5, new QTableWidgetItem(QString::number(view.range.size)));
+        table->setItem(row, 6, new QTableWidgetItem(QString::fromUtf8(type_text)));
         table->setItem(row, 7, new QTableWidgetItem{});
         ++row;
     }
+
+    table->setRowCount(row);
+    table->setSortingEnabled(true);
 }
