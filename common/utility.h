@@ -29,9 +29,20 @@ public:
 
     ~Logger()
     {
-        std::scoped_lock lock(log_mutex);
-        if (file.is_open())
-            file.close();
+        close();
+    }
+
+    void close() noexcept
+    {
+        try
+        {
+            std::scoped_lock lock(log_mutex);
+            if (file.is_open())
+                file.close();
+        }
+        catch (...)
+        {
+        }
     }
 
     void init(const std::string& filename)
@@ -105,35 +116,52 @@ class MessageIPCSender
 {
   public:
     MessageIPCSender() = default;
-    ~MessageIPCSender();
+    ~MessageIPCSender() noexcept;
     void init(const std::string &shm_name, bool create);
-    bool send(std::span<const uint8_t> bytes);
+    bool send(std::span<const uint8_t> bytes) noexcept;
 
     template <typename TCreateFn, typename... Args>
-    bool send_command(uint64_t request_id, Interface::CommandID id, Interface::Command type, TCreateFn create_fn, Args &&...args)
+    bool send_command(uint64_t request_id, Interface::CommandID id, Interface::Command type,
+                      TCreateFn create_fn, Args &&...args) noexcept
     {
-        if (!m_sharedBufferTx.is_initialized()) return false;
+        try
+        {
+            if (!m_sharedBufferTx.is_initialized()) return false;
 
-        std::scoped_lock lck(m_mutex);
+            std::scoped_lock lck(m_mutex);
 
-        auto body = create_fn(m_builder, std::forward<Args>(args)...);
+            auto body = create_fn(m_builder, std::forward<Args>(args)...);
 
-        auto envelope = Interface::CreateCommandEnvelope(m_builder, id, request_id, type, body.Union());
-        m_builder.Finish(envelope);
+            auto envelope = Interface::CreateCommandEnvelope(m_builder, id, request_id, type, body.Union());
+            m_builder.Finish(envelope);
 
-        auto buf_ptr = m_builder.GetBufferPointer();
+            auto buf_ptr = m_builder.GetBufferPointer();
 
-        const uint32_t len = m_builder.GetSize();
+            const uint32_t len = m_builder.GetSize();
 
-        m_buffer.resize(len + sizeof(len));
-        std::memcpy(m_buffer.data(), &len, sizeof(len));
-        std::memcpy(m_buffer.data() + sizeof(uint32_t), buf_ptr, len);
+            m_buffer.resize(len + sizeof(len));
+            std::memcpy(m_buffer.data(), &len, sizeof(len));
+            std::memcpy(m_buffer.data() + sizeof(uint32_t), buf_ptr, len);
 
-        bool result = m_sharedBufferTx.produce_block(m_buffer);
-        std::fill(m_buffer.begin(), m_buffer.end(), 0);
-        std::memset(m_builder.GetBufferPointer(), 0, m_builder.GetSize());
-        m_builder.Clear();
-        return result;
+            const bool result = m_sharedBufferTx.produce_block(m_buffer);
+            std::fill(m_buffer.begin(), m_buffer.end(), 0);
+            std::memset(m_builder.GetBufferPointer(), 0, m_builder.GetSize());
+            m_builder.Clear();
+            return result;
+        }
+        catch (...)
+        {
+            try
+            {
+                std::scoped_lock cleanup_lock(m_mutex);
+                m_builder.Reset();
+                m_buffer.clear();
+            }
+            catch (...)
+            {
+            }
+            return false;
+        }
     }
 
     inline void * get_shared_buffer_pointer()
@@ -145,8 +173,9 @@ class MessageIPCSender
         return m_sharedBufferTx.m_size;
     }
 
-    void close();
-    void reset();
+    void close() noexcept;
+    void reset() noexcept;
+    void release(bool close_buffer = true) noexcept;
 
   private:
     std::mutex m_mutex;

@@ -116,6 +116,7 @@ class MainWindow : public QMainWindow
     MemoryCache m_occur_storage;
     bool m_hooked = false;
     bool m_unhookPending = false;
+    bool m_hookStopAcknowledged = false;
     std::mutex m_hook_mutex;
     std::condition_variable m_hook_cv;
 };

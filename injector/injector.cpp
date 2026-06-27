@@ -12,6 +12,12 @@ Injector::~Injector()
 
 bool Injector::hook(const std::wstring &windowTitle, const std::string &dllName)
 {
+    if (m_hHook || m_hModule)
+    {
+        std::cerr << "Injector cleanup is still pending.\n";
+        return false;
+    }
+
     DWORD tid = getThreadId(windowTitle);
     if (tid == 0)
     {
@@ -31,8 +37,14 @@ bool Injector::hook(const std::wstring &windowTitle, const std::string &dllName)
     if (!addr)
     {
         std::cerr << "Failed to find HookProc.\n";
-        FreeLibrary(m_hModule);
-        m_hModule = nullptr;
+        if (FreeLibrary(m_hModule))
+        {
+            m_hModule = nullptr;
+        }
+        else
+        {
+            std::cerr << "FreeLibrary failed. Error: " << GetLastError() << "\n";
+        }
         return false;
     }
 
@@ -40,26 +52,41 @@ bool Injector::hook(const std::wstring &windowTitle, const std::string &dllName)
     if (!m_hHook)
     {
         std::cerr << "SetWindowsHookEx failed. Error: " << GetLastError() << "\n";
-        FreeLibrary(m_hModule);
-        m_hModule = nullptr;
+        if (FreeLibrary(m_hModule))
+        {
+            m_hModule = nullptr;
+        }
+        else
+        {
+            std::cerr << "FreeLibrary failed. Error: " << GetLastError() << "\n";
+        }
         return false;
     }
 
     return true;
 }
 
-void Injector::unhook()
+bool Injector::unhook()
 {
     if (m_hHook)
     {
-        UnhookWindowsHookEx(m_hHook);
+        if (!UnhookWindowsHookEx(m_hHook))
+        {
+            std::cerr << "UnhookWindowsHookEx failed. Error: " << GetLastError() << "\n";
+            return false;
+        }
         m_hHook = nullptr;
     }
     if (m_hModule)
     {
-        FreeLibrary(m_hModule);
+        if (!FreeLibrary(m_hModule))
+        {
+            std::cerr << "FreeLibrary failed. Error: " << GetLastError() << "\n";
+            return false;
+        }
         m_hModule = nullptr;
     }
+    return true;
 }
 
 DWORD Injector::getThreadId(const std::wstring &windowName)
@@ -95,5 +122,5 @@ std::string Injector::getDllPath(const std::string &dllName)
 
 bool Injector::isHooked() const
 {
-    return m_hHook != nullptr;
+    return m_hHook != nullptr || m_hModule != nullptr;
 }

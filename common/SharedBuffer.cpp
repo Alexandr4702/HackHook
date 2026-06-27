@@ -43,73 +43,118 @@ void SharedBuffer::init(const std::string &shm_name, std::size_t capacity, bool 
     start_segment_ptr = m_shm.get_address();
 }
 
-SharedBuffer::~SharedBuffer()
+SharedBuffer::~SharedBuffer() noexcept
 {
+    release();
+}
+
+bool SharedBuffer::produce_block(std::span<const uint8_t> src) noexcept
+{
+    try
+    {
+        if (!m_buf || src.size() > m_buf->capacity) return false;
+
+        bip::scoped_lock lock(m_buf->mutex);
+        m_buf->not_full.wait(lock, [&] { return m_buf->available_space() >= src.size() || m_buf->closed; });
+
+        if (m_buf->closed || m_buf->available_space() < src.size()) return false;
+
+        std::size_t first_chunk = std::min(src.size(), m_buf->capacity - m_buf->head);
+        std::copy(src.begin(), src.begin() + first_chunk, m_buf->data.get() + m_buf->head);
+
+        std::size_t remaining = src.size() - first_chunk;
+        if (remaining > 0)
+            std::copy(src.begin() + first_chunk, src.end(), m_buf->data.get());
+
+        m_buf->head = (m_buf->head + src.size()) % m_buf->capacity;
+        m_buf->count += src.size();
+
+        m_buf->not_empty.notify_all();
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool SharedBuffer::consume_block(std::span<uint8_t> dest) noexcept
+{
+    try
+    {
+        if (!m_buf || dest.size() > m_buf->capacity) return false;
+
+        bip::scoped_lock lock(m_buf->mutex);
+        m_buf->not_empty.wait(lock, [&] { return m_buf->count >= dest.size() || m_buf->closed; });
+
+        if (m_buf->closed || m_buf->count < dest.size()) return false;
+
+        std::size_t first_chunk = std::min(dest.size(), m_buf->capacity - m_buf->tail);
+        std::copy(m_buf->data.get() + m_buf->tail, m_buf->data.get() + m_buf->tail + first_chunk, dest.begin());
+
+        std::size_t remaining = dest.size() - first_chunk;
+        if (remaining > 0)
+            std::copy(m_buf->data.get(), m_buf->data.get() + remaining, dest.begin() + first_chunk);
+
+        m_buf->tail = (m_buf->tail + dest.size()) % m_buf->capacity;
+        m_buf->count -= dest.size();
+
+        m_buf->not_full.notify_all();
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+void SharedBuffer::close() noexcept
+{
+    try
+    {
+        if (!m_buf) return;
+        bip::scoped_lock lock(m_buf->mutex);
+        m_buf->closed = true;
+        m_buf->not_empty.notify_all();
+        m_buf->not_full.notify_all();
+    }
+    catch (...)
+    {
+    }
+}
+
+void SharedBuffer::reset() noexcept
+{
+    try
+    {
+        if (!m_buf) return;
+        bip::scoped_lock lock(m_buf->mutex);
+        m_buf->closed = false;
+        m_buf->head = 0;
+        m_buf->tail = 0;
+        m_buf->count = 0;
+    }
+    catch (...)
+    {
+    }
+}
+
+void SharedBuffer::release(bool close_buffer) noexcept
+{
+    if (close_buffer && m_buf)
+        close();
+
     if (m_creator && !m_shm_name.empty())
-        bip::shared_memory_object::remove(m_shm_name.c_str());
-}
+    {
+        try { bip::shared_memory_object::remove(m_shm_name.c_str()); }
+        catch (...) {}
+    }
 
-bool SharedBuffer::produce_block(std::span<const uint8_t> src)
-{
-    if (!m_buf || src.size() > m_buf->capacity) return false;
-
-    bip::scoped_lock lock(m_buf->mutex);
-    m_buf->not_full.wait(lock, [&] { return m_buf->available_space() >= src.size() || m_buf->closed; });
-
-    if (m_buf->closed || m_buf->available_space() < src.size()) return false;
-
-    std::size_t first_chunk = std::min(src.size(), m_buf->capacity - m_buf->head);
-    std::copy(src.begin(), src.begin() + first_chunk, m_buf->data.get() + m_buf->head);
-
-    std::size_t remaining = src.size() - first_chunk;
-    if (remaining > 0)
-        std::copy(src.begin() + first_chunk, src.end(), m_buf->data.get());
-
-    m_buf->head = (m_buf->head + src.size()) % m_buf->capacity;
-    m_buf->count += src.size();
-
-    m_buf->not_empty.notify_all();
-    return true;
-}
-
-bool SharedBuffer::consume_block(std::span<uint8_t> dest)
-{
-    if (!m_buf || dest.size() > m_buf->capacity) return false;
-
-    bip::scoped_lock lock(m_buf->mutex);
-    m_buf->not_empty.wait(lock, [&] { return m_buf->count >= dest.size() || m_buf->closed; });
-
-    if (m_buf->closed || m_buf->count < dest.size()) return false;
-
-    std::size_t first_chunk = std::min(dest.size(), m_buf->capacity - m_buf->tail);
-    std::copy(m_buf->data.get() + m_buf->tail, m_buf->data.get() + m_buf->tail + first_chunk, dest.begin());
-
-    std::size_t remaining = dest.size() - first_chunk;
-    if (remaining > 0)
-        std::copy(m_buf->data.get(), m_buf->data.get() + remaining, dest.begin() + first_chunk);
-
-    m_buf->tail = (m_buf->tail + dest.size()) % m_buf->capacity;
-    m_buf->count -= dest.size();
-
-    m_buf->not_full.notify_all();
-    return true;
-}
-
-void SharedBuffer::close()
-{
-    if (!m_buf) return;
-    bip::scoped_lock lock(m_buf->mutex);
-    m_buf->closed = true;
-    m_buf->not_empty.notify_all();
-    m_buf->not_full.notify_all();
-}
-
-void SharedBuffer::reset()
-{
-    if (!m_buf) return;
-    bip::scoped_lock lock(m_buf->mutex);
-    m_buf->closed = false;
-    m_buf->head = 0;
-    m_buf->tail = 0;
-    m_buf->count = 0;
+    m_buf = nullptr;
+    start_segment_ptr = nullptr;
+    try { m_shm = bip::managed_shared_memory{}; }
+    catch (...) {}
+    std::string{}.swap(m_shm_name);
+    m_creator = false;
+    m_size = 0;
 }
