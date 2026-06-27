@@ -115,6 +115,7 @@ class MainWindow : public QMainWindow
     RpcClient m_rpc_client;
     MemoryCache m_occur_storage;
     bool m_hooked = false;
+    bool m_hookReady = false;
     bool m_unhookPending = false;
     bool m_hookStopAcknowledged = false;
     std::mutex m_hook_mutex;

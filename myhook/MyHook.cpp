@@ -419,6 +419,12 @@ DWORD WINAPI MyHook::MsgConsumerThread()
     std::pmr::vector<uint8_t> buff(&m_pool);
     buff.resize(4);
 
+    if (!m_sender.send_command(0, Interface::CommandID_READY,
+                               Interface::Command::Command_NONE, Interface::CreateEmptyCommand))
+    {
+        return ERROR_WRITE_FAULT;
+    }
+
     while (m_running.load(std::memory_order_acquire))
     {
         uint32_t len = 0;

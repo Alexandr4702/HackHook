@@ -14,6 +14,7 @@ enum CommandID : byte {
   ACK,
   NACK,
   STOP,
+  READY,
 }
 
 enum ValueType : byte {

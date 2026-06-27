@@ -247,6 +247,15 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
         qDebug() << "[HandleMessage] Received CommandID_NACK command";
         m_rpc_client.call_cb(msg->request_id(), msg);
         break;
+    case Interface::CommandID_READY:
+        if (m_hooked && !m_unhookPending)
+        {
+            m_hookReady = true;
+            ui->hookButton->setText("Unhook");
+            ui->dumpButton->setEnabled(true);
+            qDebug() << "Hook worker is ready";
+        }
+        break;
     case Interface::CommandID_FIND_ACK:
     {
         auto* ack = msg->body_as_FindAck();
@@ -335,12 +344,13 @@ void MainWindow::on_hookButton_clicked()
             DWORD pid = 0;
             GetWindowThreadProcessId(m_injector.getHWND(), &pid);
             qDebug() << std::format(L"HookInjected {} {} {}", windowName, reinterpret_cast<uintptr_t>(m_injector.getHWND()), pid);
-            ui->hookButton->setText("Unhook");
+            ui->hookButton->setText("Cancel Hook");
             m_hooked = true;
+            m_hookReady = false;
             m_unhookPending = false;
             m_hookStopAcknowledged = false;
             m_hook_cv.notify_all();
-            ui->dumpButton->setEnabled(true);
+            ui->dumpButton->setEnabled(false);
         } 
         else {
             qDebug() << "Hook is not injected " << windowName;
@@ -355,6 +365,16 @@ void MainWindow::on_hookButton_clicked()
     {
         if (m_unhookPending)
             return;
+
+        if (!m_hookReady)
+        {
+            // The hook is installed, but its worker has not confirmed startup.
+            // Closing IPC and removing the hook does not require a STOP round-trip.
+            m_hookStopAcknowledged = true;
+            lck.unlock();
+            finishUnhook();
+            return;
+        }
 
         if (m_hookStopAcknowledged)
         {
@@ -392,6 +412,7 @@ void MainWindow::finishUnhook()
     {
         std::scoped_lock lock(m_hook_mutex);
         m_hooked = false;
+        m_hookReady = false;
         m_hook_cv.notify_all();
     }
 
@@ -416,7 +437,7 @@ void MainWindow::finishUnhook()
 
 void MainWindow::on_dumpButton_clicked()
 {
-    if (m_unhookPending || !m_injector.isHooked())
+    if (m_unhookPending || !m_hookReady || !m_injector.isHooked())
         return;
 
     qDebug() << "Dump button clicked";
@@ -428,7 +449,7 @@ void MainWindow::on_dumpButton_clicked()
 void MainWindow::on_firstScanButton_clicked()
 {
     using namespace Interface;
-    if (m_unhookPending || !m_injector.isHooked())
+    if (m_unhookPending || !m_hookReady || !m_injector.isHooked())
     {
         return;
     }
@@ -455,7 +476,7 @@ void MainWindow::on_firstScanButton_clicked()
 
 void MainWindow::on_nextScanButton_clicked()
 {
-    if (m_unhookPending || !m_injector.isHooked())
+    if (m_unhookPending || !m_hookReady || !m_injector.isHooked())
     {
         return;
     }
@@ -565,7 +586,7 @@ void MainWindow::filterOccurrences(std::span<const uint8_t> value, Interface::Va
 
 void MainWindow::on_pressKeyButton_clicked()
 {
-    if (m_unhookPending || !m_injector.isHooked())
+    if (m_unhookPending || !m_hookReady || !m_injector.isHooked())
     {
         return;
     }
