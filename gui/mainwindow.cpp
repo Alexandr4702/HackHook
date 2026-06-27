@@ -318,14 +318,16 @@ void MainWindow::on_hookButton_clicked()
             qDebug() << "Window name is empty " << windowName;
             return;
         }
+
+        // Reopen and clear IPC before the hook can start its worker in the target process.
+        m_sender.reset();
+        m_reciver.reset();
         if (m_injector.hook(windowName))
         {
             DWORD pid = 0;
             GetWindowThreadProcessId(m_injector.getHWND(), &pid);
             qDebug() << std::format(L"HookInjected {} {} {}", windowName, reinterpret_cast<uintptr_t>(m_injector.getHWND()), pid);
             ui->hookButton->setText("Unhook");
-            m_sender.reset();
-            m_reciver.reset();
             m_hooked = true;
             m_unhookPending = false;
             m_hook_cv.notify_all();

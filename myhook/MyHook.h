@@ -38,9 +38,16 @@ class MyHook
         HMODULE module;
     };
 
-    std::atomic<bool> m_running = true;
-    std::atomic<bool> m_threadStarted = false;
-    std::atomic<bool> m_stopping = false;
+    enum class State : uint8_t
+    {
+        Stopped,
+        Starting,
+        Running,
+        Stopping,
+    };
+
+    std::atomic<bool> m_running = false;
+    std::atomic<State> m_state = State::Stopped;
     HWND m_targetHwnd = nullptr;
     MessageIPCSender m_sender;
     SharedBuffer m_reciver;

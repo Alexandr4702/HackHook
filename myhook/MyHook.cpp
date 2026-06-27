@@ -84,17 +84,14 @@ MyHook::~MyHook() noexcept
 
 void MyHook::start() noexcept
 {
-    if (m_stopping.load(std::memory_order_acquire))
-        return;
-
-    if (m_threadStarted.exchange(true))
+    State expected = State::Stopped;
+    if (!m_state.compare_exchange_strong(expected, State::Starting, std::memory_order_acq_rel))
         return;
 
     HMODULE module = nullptr;
     auto cleanup_failed_start = [this, &module]() noexcept {
-        m_stopping.store(true, std::memory_order_release);
+        m_state.store(State::Stopping, std::memory_order_release);
         m_running.store(false, std::memory_order_release);
-        m_threadStarted.store(false, std::memory_order_release);
         try { m_memTool.reset(); } catch (...) {}
         try { m_reciver.close(); } catch (...) {}
         try { m_sender.close(); } catch (...) {}
@@ -124,6 +121,7 @@ void MyHook::start() noexcept
 
         auto context = std::make_unique<WorkerContext>(WorkerContext{this, module});
         WorkerContext *raw_context = context.release();
+        m_state.store(State::Running, std::memory_order_release);
         HANDLE worker = CreateThread(nullptr, 0, &MyHook::ThreadWrapperMsg, raw_context, 0, nullptr);
         if (!worker)
         {
@@ -149,10 +147,10 @@ void MyHook::start() noexcept
 
 void MyHook::stop()
 {
-    if (!m_threadStarted.exchange(false))
+    State expected = State::Running;
+    if (!m_state.compare_exchange_strong(expected, State::Stopping, std::memory_order_acq_rel))
         return;
 
-    m_stopping.store(true, std::memory_order_release);
     m_running.store(false, std::memory_order_release);
     m_reciver.close();
     m_sender.close();
@@ -186,10 +184,11 @@ DWORD WINAPI MyHook::ThreadWrapperMsg(LPVOID param) noexcept
     }
 
     self->m_running.store(false, std::memory_order_release);
+    const State previous_state = self->m_state.exchange(State::Stopping, std::memory_order_acq_rel);
     try { self->m_reciver.close(); } catch (...) { report_boundary_error(&self->m_log, "ThreadWrapperMsg receiver cleanup"); }
     try
     {
-        if (!self->m_stopping.load(std::memory_order_acquire))
+        if (previous_state != State::Stopping)
             self->m_sender.close();
     }
     catch (...)
@@ -197,7 +196,6 @@ DWORD WINAPI MyHook::ThreadWrapperMsg(LPVOID param) noexcept
         report_boundary_error(&self->m_log, "ThreadWrapperMsg sender cleanup");
     }
     try { self->m_memTool.reset(); } catch (...) { report_boundary_error(&self->m_log, "ThreadWrapperMsg MemTool cleanup"); }
-    self->m_threadStarted.store(false, std::memory_order_release);
 
     if (module)
         FreeLibraryAndExitThread(module, result);
@@ -368,7 +366,7 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
         break;
     }
     case Interface::CommandID_STOP: {
-        m_stopping.store(true, std::memory_order_release);
+        m_state.store(State::Stopping, std::memory_order_release);
         m_running.store(false, std::memory_order_release);
         m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_ACK,
                               Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
