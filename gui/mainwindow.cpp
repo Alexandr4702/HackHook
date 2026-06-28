@@ -4,6 +4,7 @@
 #include "interface_generated.h"
 #include "ui_mainwindow.h"
 #include <QMenu>
+#include <QCloseEvent>
 #include <QMessageBox>
 #include <QMetaObject>
 #include <QPointer>
@@ -155,6 +156,67 @@ MainWindow::~MainWindow()
         m_injector.unhook();
     }
     delete ui;
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    if (m_closeApproved || !m_injector.isHooked())
+    {
+        event->accept();
+        return;
+    }
+
+    event->ignore();
+    if (m_closePending)
+        return;
+
+    m_closePending = true;
+
+    if (!m_hookReady || m_hookStopAcknowledged)
+    {
+        finishClose();
+        return;
+    }
+
+    m_unhookPending = true;
+    ui->hookButton->setEnabled(false);
+
+    const bool sent = m_rpc_client.send_rpc_cb(
+        [this](const Interface::CommandEnvelope *msg) {
+            if (!msg || msg->id() != Interface::CommandID_ACK)
+            {
+                m_unhookPending = false;
+                m_closePending = false;
+                ui->hookButton->setEnabled(true);
+                qWarning() << "Hook did not acknowledge shutdown; window remains open";
+                return;
+            }
+
+            m_hookStopAcknowledged = true;
+            finishClose();
+        },
+        Interface::CommandID_STOP, Interface::Command::Command_NONE,
+        Interface::CreateEmptyCommand);
+
+    if (!sent)
+    {
+        m_unhookPending = false;
+        m_closePending = false;
+        ui->hookButton->setEnabled(true);
+        qWarning() << "Failed to send hook shutdown command; window remains open";
+    }
+}
+
+void MainWindow::finishClose()
+{
+    if (!finishUnhook())
+    {
+        m_closePending = false;
+        return;
+    }
+
+    m_closeApproved = true;
+    QMetaObject::invokeMethod(this, [this]() { close(); }, Qt::QueuedConnection);
 }
 
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam)
@@ -415,7 +477,7 @@ void MainWindow::on_hookButton_clicked()
     }
 }
 
-void MainWindow::finishUnhook()
+bool MainWindow::finishUnhook()
 {
     {
         std::scoped_lock lock(m_hook_mutex);
@@ -432,7 +494,7 @@ void MainWindow::finishUnhook()
         ui->hookButton->setText("Retry Unhook");
         ui->hookButton->setEnabled(true);
         qWarning() << "Failed to remove hook";
-        return;
+        return false;
     }
 
     m_unhookPending = false;
@@ -441,6 +503,7 @@ void MainWindow::finishUnhook()
     ui->hookButton->setText("Inject Hook");
     ui->hookButton->setEnabled(true);
     qDebug() << "unhooked";
+    return true;
 }
 
 void MainWindow::on_dumpButton_clicked()

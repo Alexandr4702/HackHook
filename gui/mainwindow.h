@@ -19,6 +19,7 @@
 #include "MemoryCache.h"
 
 class QPoint;
+class QCloseEvent;
 
 QT_BEGIN_NAMESPACE
 namespace Ui
@@ -39,6 +40,9 @@ class MainWindow : public QMainWindow
     void MsgConsumerThread();
     void HandleMessage(const Interface::CommandEnvelope *msg);
 
+  protected:
+    void closeEvent(QCloseEvent *event) override;
+
   private slots:
     void on_windowSelectorOpened();
     void on_hookButton_clicked();
@@ -57,7 +61,8 @@ class MainWindow : public QMainWindow
     using RegionDataCallback = std::function<void(std::vector<uint8_t>, MemoryRegionDetails)>;
     bool requestRegionData(const FoundOccurrences &occurrence, RegionDataCallback done,
                            std::function<void()> failed = {});
-    void finishUnhook();
+    bool finishUnhook();
+    void finishClose();
 
     class RpcClient
     {
@@ -126,6 +131,8 @@ class MainWindow : public QMainWindow
     bool m_hookReady = false;
     bool m_unhookPending = false;
     bool m_hookStopAcknowledged = false;
+    bool m_closePending = false;
+    bool m_closeApproved = false;
     std::mutex m_hook_mutex;
     std::condition_variable m_hook_cv;
 };
