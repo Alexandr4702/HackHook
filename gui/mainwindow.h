@@ -52,7 +52,7 @@ class MainWindow : public QMainWindow
     void refreshCachedRegions(std::function<void()> done);
     void filterOccurrences(std::span<const uint8_t> value, Interface::ValueType type);
     void showResultsContextMenu(const QPoint &position);
-    void viewRegion(const FoundOccurrences &occurrence);
+    void viewRegion(const FoundOccurrences &occurrence, std::vector<FoundOccurrences> regionOccurrences);
     void finishUnhook();
 
     class RpcClient

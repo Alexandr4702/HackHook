@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "MemoryCache.h"
+#include "OccurrenceColors.h"
 #include "RegionViewDialog.h"
 #include "interface_generated.h"
 #include "ui_mainwindow.h"
@@ -11,6 +12,7 @@
 #include <charconv>
 #include <cstdint>
 #include <exception>
+#include <map>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -629,10 +631,24 @@ void MainWindow::showResultsContextMenu(const QPoint &position)
     QAction *viewRegionAction = menu.addAction(tr("View region"));
     viewRegionAction->setEnabled(m_hookReady && !m_unhookPending && m_injector.isHooked());
     if (menu.exec(ui->resultsTable->viewport()->mapToGlobal(position)) == viewRegionAction)
-        viewRegion(occurrence);
+    {
+        std::vector<FoundOccurrences> regionOccurrences;
+        for (const auto &view : m_occur_storage.views())
+        {
+            if (view.occurrence.baseAddress == occurrence.baseAddress &&
+                view.occurrence.region_size == occurrence.region_size)
+            {
+                regionOccurrences.push_back(view.occurrence);
+            }
+        }
+        if (regionOccurrences.empty())
+            regionOccurrences.push_back(occurrence);
+        viewRegion(occurrence, std::move(regionOccurrences));
+    }
 }
 
-void MainWindow::viewRegion(const FoundOccurrences &occurrence)
+void MainWindow::viewRegion(const FoundOccurrences &occurrence,
+                            std::vector<FoundOccurrences> regionOccurrences)
 {
     if (occurrence.region_size == 0 || occurrence.region_size > BUFFER_CAPACITY - 1024)
     {
@@ -642,7 +658,8 @@ void MainWindow::viewRegion(const FoundOccurrences &occurrence)
     }
 
     const bool sent = m_rpc_client.send_rpc_cb(
-        [this, occurrence](const Interface::CommandEnvelope *msg) {
+        [this, occurrence, regionOccurrences = std::move(regionOccurrences)](
+            const Interface::CommandEnvelope *msg) mutable {
             if (!msg || msg->id() != Interface::CommandID_READ_ACK)
             {
                 QMessageBox::warning(this, tr("View region"), tr("Failed to read the selected region."));
@@ -660,8 +677,8 @@ void MainWindow::viewRegion(const FoundOccurrences &occurrence)
             std::vector<uint8_t> data;
             if (readData->size() != 0)
                 data.assign(readData->data(), readData->data() + readData->size());
-            auto *dialog =
-                new RegionViewDialog(occurrence, std::move(data), ui->windowSelectorCombo->currentText(), this);
+            auto *dialog = new RegionViewDialog(occurrence, std::move(regionOccurrences), std::move(data),
+                                                ui->windowSelectorCombo->currentText(), this);
             dialog->show();
         },
         Interface::CommandID_READ, Interface::Command::Command_ReadCommand, Interface::CreateReadCommand,
@@ -678,6 +695,7 @@ void MainWindow::printOccurences(const MemoryCache &occurences)
     table->clearContents();
     table->setRowCount(static_cast<int>(occurences.views().size()));
 
+    std::map<std::pair<uint64_t, uint64_t>, size_t> regionColorIndices;
     int row = 0;
     for (const auto &view : occurences.views())
     {
@@ -689,9 +707,13 @@ void MainWindow::printOccurences(const MemoryCache &occurences)
         const auto value_type = view.type();
         const auto type_index = static_cast<size_t>(value_type);
         const char *type_text = type_index < valueTypes.size() ? valueTypes[type_index].first : "Unknown";
+        const auto regionKey = std::pair{occur.baseAddress, occur.region_size};
+        const QColor color = occurrenceColor(regionColorIndices[regionKey]++);
 
         const auto value_text = valueToString(*data, value_type);
         auto *valueItem = new QTableWidgetItem(QString::fromStdString(value_text));
+        valueItem->setBackground(color);
+        valueItem->setForeground(Qt::black);
         valueItem->setData(baseAddressRole, QVariant::fromValue<qulonglong>(occur.baseAddress));
         valueItem->setData(offsetRole, QVariant::fromValue<qulonglong>(occur.offset));
         valueItem->setData(regionSizeRole, QVariant::fromValue<qulonglong>(occur.region_size));

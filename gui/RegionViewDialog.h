@@ -9,6 +9,6 @@
 class RegionViewDialog : public QDialog
 {
   public:
-    RegionViewDialog(FoundOccurrences occurrence, std::vector<uint8_t> data, QString windowName,
-                     QWidget *parent = nullptr);
+    RegionViewDialog(FoundOccurrences selectedOccurrence, std::vector<FoundOccurrences> regionOccurrences,
+                     std::vector<uint8_t> data, QString windowName, QWidget *parent = nullptr);
 };
