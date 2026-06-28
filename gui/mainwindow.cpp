@@ -1,7 +1,10 @@
 #include "mainwindow.h"
 #include "MemoryCache.h"
+#include "RegionViewDialog.h"
 #include "interface_generated.h"
 #include "ui_mainwindow.h"
+#include <QMenu>
+#include <QMessageBox>
 #include <QMetaObject>
 #include <QTableWidgetItem>
 #include <atomic>
@@ -15,113 +18,120 @@
 #include <vector>
 #include <windows.h>
 
-
 namespace
 {
 
-    constexpr std::array<std::pair<const char*, Interface::ValueType>, Interface::ValueType_LAST> valueTypes {{
-        {"Int32",     Interface::ValueType_Int32},
-        {"Float",     Interface::ValueType_Float},
-        {"Double",    Interface::ValueType_Double},
-        {"Int64",     Interface::ValueType_Int64},
-        {"String",    Interface::ValueType_String},
-        {"String16",  Interface::ValueType_String16},
-        {"ByteArray", Interface::ValueType_ByteArray}
-    }};
+constexpr int baseAddressRole = Qt::UserRole + 1;
+constexpr int offsetRole = Qt::UserRole + 2;
+constexpr int regionSizeRole = Qt::UserRole + 3;
+constexpr int dataSizeRole = Qt::UserRole + 4;
+constexpr int valueTypeRole = Qt::UserRole + 5;
 
-    std::vector<uint8_t> string2data(const QString &text, int value_type)
+constexpr std::array<std::pair<const char *, Interface::ValueType>, Interface::ValueType_LAST> valueTypes{
+    {{"Int32", Interface::ValueType_Int32},
+     {"Float", Interface::ValueType_Float},
+     {"Double", Interface::ValueType_Double},
+     {"Int64", Interface::ValueType_Int64},
+     {"String", Interface::ValueType_String},
+     {"String16", Interface::ValueType_String16},
+     {"ByteArray", Interface::ValueType_ByteArray}}};
+
+std::vector<uint8_t> string2data(const QString &text, int value_type)
+{
+    using namespace Interface;
+
+    std::vector<uint8_t> data;
+    const QByteArray utf8 = text.toUtf8();
+    const std::string_view input(utf8.constData(), static_cast<size_t>(utf8.size()));
+
+    auto parse_value = [input, &data](auto &value) {
+        const auto [end, error] = std::from_chars(input.data(), input.data() + input.size(), value);
+        if (error != std::errc{} || end != input.data() + input.size())
+            return false;
+
+        const auto *bytes = reinterpret_cast<const uint8_t *>(&value);
+        data.assign(bytes, bytes + sizeof(value));
+        return true;
+    };
+
+    switch (value_type)
     {
-        using namespace Interface;
-
-        std::vector<uint8_t> data;
-        const QByteArray utf8 = text.toUtf8();
-        const std::string_view input(utf8.constData(), static_cast<size_t>(utf8.size()));
-
-        auto parse_value = [input, &data](auto &value) {
-            const auto [end, error] = std::from_chars(input.data(), input.data() + input.size(), value);
-            if (error != std::errc{} || end != input.data() + input.size())
-                return false;
-
-            const auto *bytes = reinterpret_cast<const uint8_t *>(&value);
-            data.assign(bytes, bytes + sizeof(value));
-            return true;
-        };
-
-        switch (value_type)
-        {
-        case ValueType::ValueType_Int32: {
-            int32_t val = 0;
-            if (!parse_value(val))
-                return {};
-            break;
-        }
-        case ValueType::ValueType_Float: {
-            float val = 0;
-            if (!parse_value(val))
-                return {};
-            break;
-        }
-        case ValueType::ValueType_Double: {
-            double val = 0;
-            if (!parse_value(val))
-                return {};
-            break;
-        }
-        case ValueType::ValueType_Int64: {
-            int64_t val = 0;
-            if (!parse_value(val))
-                return {};
-            break;
-        }
-        case ValueType::ValueType_String: {
-            data.assign(input.begin(), input.end());
-            break;
-        }
-        case ValueType::ValueType_String16: {
-            auto str = text.toStdU16String();
-            uint8_t *p = reinterpret_cast<uint8_t *>(str.data());
-            data.assign(p, p + str.size() * sizeof(char16_t));
-            break;
-        }
-        case ValueType::ValueType_ByteArray: {
-            std::string hex(input);
-
-            if (hex.size() % 2 != 0)
-            {
-                hex.insert(hex.begin(), '0');
-            }
-            for (size_t i = 0; i < hex.size(); i += 2)
-            {
-                unsigned int value = 0;
-                const char *begin = hex.data() + i;
-                const char *end = begin + 2;
-                const auto [parsed_end, error] = std::from_chars(begin, end, value, 16);
-                if (error != std::errc{} || parsed_end != end)
-                    return {};
-                data.push_back(static_cast<uint8_t>(value));
-            }
-            break;
-        }
-        default:
-            break;
-        }
-        return data;
+    case ValueType::ValueType_Int32: {
+        int32_t val = 0;
+        if (!parse_value(val))
+            return {};
+        break;
     }
+    case ValueType::ValueType_Float: {
+        float val = 0;
+        if (!parse_value(val))
+            return {};
+        break;
+    }
+    case ValueType::ValueType_Double: {
+        double val = 0;
+        if (!parse_value(val))
+            return {};
+        break;
+    }
+    case ValueType::ValueType_Int64: {
+        int64_t val = 0;
+        if (!parse_value(val))
+            return {};
+        break;
+    }
+    case ValueType::ValueType_String: {
+        data.assign(input.begin(), input.end());
+        break;
+    }
+    case ValueType::ValueType_String16: {
+        auto str = text.toStdU16String();
+        uint8_t *p = reinterpret_cast<uint8_t *>(str.data());
+        data.assign(p, p + str.size() * sizeof(char16_t));
+        break;
+    }
+    case ValueType::ValueType_ByteArray: {
+        std::string hex(input);
+
+        if (hex.size() % 2 != 0)
+        {
+            hex.insert(hex.begin(), '0');
+        }
+        for (size_t i = 0; i < hex.size(); i += 2)
+        {
+            unsigned int value = 0;
+            const char *begin = hex.data() + i;
+            const char *end = begin + 2;
+            const auto [parsed_end, error] = std::from_chars(begin, end, value, 16);
+            if (error != std::errc{} || parsed_end != end)
+                return {};
+            data.push_back(static_cast<uint8_t>(value));
+        }
+        break;
+    }
+    default:
+        break;
+    }
+    return data;
+}
 } // namespace
 
-MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), ui(new Ui::MainWindow), m_rpc_client(m_sender)
+MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow), m_rpc_client(m_sender)
 {
     m_sender.init(BUFFER_NAME_TX, true);
     m_reciver.init(BUFFER_NAME_RX, BUFFER_CAPACITY, true);
     ui->setupUi(this);
     ui->dumpButton->setEnabled(false);
+    ui->resultsTable->setContextMenuPolicy(Qt::CustomContextMenu);
+    ui->resultsTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    connect(ui->resultsTable, &QTableWidget::customContextMenuRequested, this, &MainWindow::showResultsContextMenu);
     for (const auto &[text, type] : valueTypes)
     {
         ui->valueTypeCombo->addItem(text, static_cast<int>(type));
     }
     m_recive_thread = std::jthread(&MainWindow::MsgConsumerThread, this);
-    connect(ui->windowSelectorCombo, &WindowSelectorCombo::aboutToShowPopup, this, &MainWindow::on_windowSelectorOpened);
+    connect(ui->windowSelectorCombo, &WindowSelectorCombo::aboutToShowPopup, this,
+            &MainWindow::on_windowSelectorOpened);
 }
 
 MainWindow::~MainWindow()
@@ -138,7 +148,7 @@ MainWindow::~MainWindow()
         m_recive_thread.join();
     }
     m_sender.close();
-    
+
     if (m_injector.isHooked())
     {
         m_injector.unhook();
@@ -207,10 +217,7 @@ void MainWindow::MsgConsumerThread()
             }
             auto msg_data = std::make_shared<std::vector<uint8_t>>(buff);
             QMetaObject::invokeMethod(
-                this,
-                [this, msg_data]() {
-                    HandleMessage(GetCommandEnvelope(msg_data->data()));
-                },
+                this, [this, msg_data]() { HandleMessage(GetCommandEnvelope(msg_data->data())); },
                 Qt::QueuedConnection);
         }
     }
@@ -256,9 +263,8 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
             qDebug() << "Hook worker is ready";
         }
         break;
-    case Interface::CommandID_FIND_ACK:
-    {
-        auto* ack = msg->body_as_FindAck();
+    case Interface::CommandID_FIND_ACK: {
+        auto *ack = msg->body_as_FindAck();
         if (!ack || !ack->value() || !ack->occurrences())
         {
             qWarning() << "Invalid FIND_ACK payload";
@@ -269,7 +275,7 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
         auto value_type = ack->value_type();
         std::vector<uint8_t> data(value->data(), value->data() + value->size());
         qDebug() << std::format(L"CommandID_FIND_ACK recived found {} occurrences ", occurrences->size());
-        for(auto occur: *occurrences)
+        for (auto occur : *occurrences)
         {
             FoundOccurrences found{
                 .baseAddress = occur->base_address(),
@@ -338,7 +344,8 @@ void MainWindow::on_hookButton_clicked()
         {
             DWORD pid = 0;
             GetWindowThreadProcessId(m_injector.getHWND(), &pid);
-            qDebug() << std::format(L"HookInjected {} {} {}", windowName, reinterpret_cast<uintptr_t>(m_injector.getHWND()), pid);
+            qDebug() << std::format(L"HookInjected {} {} {}", windowName,
+                                    reinterpret_cast<uintptr_t>(m_injector.getHWND()), pid);
             ui->hookButton->setText("Cancel Hook");
             m_hooked = true;
             m_hookReady = false;
@@ -346,8 +353,9 @@ void MainWindow::on_hookButton_clicked()
             m_hookStopAcknowledged = false;
             m_hook_cv.notify_all();
             ui->dumpButton->setEnabled(false);
-        } 
-        else {
+        }
+        else
+        {
             qDebug() << "Hook is not injected " << windowName;
             if (m_injector.isHooked())
             {
@@ -460,12 +468,14 @@ void MainWindow::on_firstScanButton_clicked()
         return;
     }
 
-    auto create_find_cmd = [](flatbuffers::FlatBufferBuilder &builder, Interface::ValueType type, const std::vector<uint8_t> &data) {
+    auto create_find_cmd = [](flatbuffers::FlatBufferBuilder &builder, Interface::ValueType type,
+                              const std::vector<uint8_t> &data) {
         auto vec = builder.CreateVector(data);
         return Interface::CreateFindCommand(builder, type, vec);
     };
 
-    m_rpc_client.send_rpc(Interface::CommandID::CommandID_FIND, Interface::Command::Command_FindCommand, create_find_cmd, static_cast<Interface::ValueType> (value_type), data);
+    m_rpc_client.send_rpc(Interface::CommandID::CommandID_FIND, Interface::Command::Command_FindCommand,
+                          create_find_cmd, static_cast<Interface::ValueType>(value_type), data);
     qDebug() << "on_firstScan_clicked " << ui->valueTypeCombo->currentData().toInt() << " " << text;
 }
 
@@ -546,8 +556,8 @@ void MainWindow::refreshCachedRegions(std::function<void()> done)
                 }
                 finish_one();
             },
-            Interface::CommandID_READ, Interface::Command::Command_ReadCommand, Interface::CreateReadCommand, range.base,
-            static_cast<uint64_t>(range.size));
+            Interface::CommandID_READ, Interface::Command::Command_ReadCommand, Interface::CreateReadCommand,
+            range.base, static_cast<uint64_t>(range.size));
 
         if (!sent)
         {
@@ -568,9 +578,8 @@ void MainWindow::filterOccurrences(std::span<const uint8_t> value, Interface::Va
     for (const auto &view : views)
     {
         auto cached_data = m_occur_storage.data(view.range);
-        const bool matches =
-            view.type() == type && cached_data && cached_data->size() >= value.size() &&
-            std::ranges::equal(value, std::span<const uint8_t>(cached_data->data(), value.size()));
+        const bool matches = view.type() == type && cached_data && cached_data->size() >= value.size() &&
+                             std::ranges::equal(value, std::span<const uint8_t>(cached_data->data(), value.size()));
 
         if (!matches)
         {
@@ -596,6 +605,72 @@ void MainWindow::on_clearButton_clicked()
     printOccurences(m_occur_storage);
 }
 
+void MainWindow::showResultsContextMenu(const QPoint &position)
+{
+    auto *clickedItem = ui->resultsTable->itemAt(position);
+    if (!clickedItem)
+        return;
+
+    const int row = clickedItem->row();
+    auto *valueItem = ui->resultsTable->item(row, 0);
+    if (!valueItem)
+        return;
+
+    FoundOccurrences occurrence{
+        .baseAddress = valueItem->data(baseAddressRole).toULongLong(),
+        .offset = valueItem->data(offsetRole).toULongLong(),
+        .region_size = valueItem->data(regionSizeRole).toULongLong(),
+        .data_size = valueItem->data(dataSizeRole).toULongLong(),
+        .type = valueItem->data(valueTypeRole).toInt(),
+    };
+
+    ui->resultsTable->selectRow(row);
+    QMenu menu(this);
+    QAction *viewRegionAction = menu.addAction(tr("View region"));
+    viewRegionAction->setEnabled(m_hookReady && !m_unhookPending && m_injector.isHooked());
+    if (menu.exec(ui->resultsTable->viewport()->mapToGlobal(position)) == viewRegionAction)
+        viewRegion(occurrence);
+}
+
+void MainWindow::viewRegion(const FoundOccurrences &occurrence)
+{
+    if (occurrence.region_size == 0 || occurrence.region_size > BUFFER_CAPACITY - 1024)
+    {
+        QMessageBox::warning(this, tr("View region"),
+                             tr("Region size %1 cannot be read in one IPC message.").arg(occurrence.region_size));
+        return;
+    }
+
+    const bool sent = m_rpc_client.send_rpc_cb(
+        [this, occurrence](const Interface::CommandEnvelope *msg) {
+            if (!msg || msg->id() != Interface::CommandID_READ_ACK)
+            {
+                QMessageBox::warning(this, tr("View region"), tr("Failed to read the selected region."));
+                return;
+            }
+
+            const auto *ack = msg->body_as_ReadAck();
+            const auto *readData = ack ? ack->data() : nullptr;
+            if (!readData)
+            {
+                QMessageBox::warning(this, tr("View region"), tr("The selected region returned no data."));
+                return;
+            }
+
+            std::vector<uint8_t> data;
+            if (readData->size() != 0)
+                data.assign(readData->data(), readData->data() + readData->size());
+            auto *dialog =
+                new RegionViewDialog(occurrence, std::move(data), ui->windowSelectorCombo->currentText(), this);
+            dialog->show();
+        },
+        Interface::CommandID_READ, Interface::Command::Command_ReadCommand, Interface::CreateReadCommand,
+        occurrence.baseAddress, occurrence.region_size);
+
+    if (!sent)
+        QMessageBox::warning(this, tr("View region"), tr("Failed to send the region read request."));
+}
+
 void MainWindow::printOccurences(const MemoryCache &occurences)
 {
     auto *table = ui->resultsTable;
@@ -616,9 +691,14 @@ void MainWindow::printOccurences(const MemoryCache &occurences)
         const char *type_text = type_index < valueTypes.size() ? valueTypes[type_index].first : "Unknown";
 
         const auto value_text = valueToString(*data, value_type);
-        table->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(value_text)));
-        table->setItem(row, 1,
-                       new QTableWidgetItem(QString("0x%1").arg(occur.baseAddress + occur.offset, 0, 16)));
+        auto *valueItem = new QTableWidgetItem(QString::fromStdString(value_text));
+        valueItem->setData(baseAddressRole, QVariant::fromValue<qulonglong>(occur.baseAddress));
+        valueItem->setData(offsetRole, QVariant::fromValue<qulonglong>(occur.offset));
+        valueItem->setData(regionSizeRole, QVariant::fromValue<qulonglong>(occur.region_size));
+        valueItem->setData(dataSizeRole, QVariant::fromValue<qulonglong>(occur.data_size));
+        valueItem->setData(valueTypeRole, occur.type);
+        table->setItem(row, 0, valueItem);
+        table->setItem(row, 1, new QTableWidgetItem(QString("0x%1").arg(occur.baseAddress + occur.offset, 0, 16)));
         table->setItem(row, 2, new QTableWidgetItem(QString("0x%1").arg(occur.baseAddress, 0, 16)));
         table->setItem(row, 3, new QTableWidgetItem(QString::number(occur.offset)));
         table->setItem(row, 4, new QTableWidgetItem(QString::number(occur.region_size)));

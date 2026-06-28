@@ -14,6 +14,8 @@ add_executable(gui_app
     main.cpp
     mainwindow.cpp
     mainwindow.h
+    RegionViewDialog.cpp
+    RegionViewDialog.h
     WindowSelectorCombo.h
     mainwindow.ui
 )

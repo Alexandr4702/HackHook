@@ -17,6 +17,8 @@
 #include <vector>
 #include "MemoryCache.h"
 
+class QPoint;
+
 QT_BEGIN_NAMESPACE
 namespace Ui
 {
@@ -49,6 +51,8 @@ class MainWindow : public QMainWindow
     void printOccurences(const MemoryCache &occurences);
     void refreshCachedRegions(std::function<void()> done);
     void filterOccurrences(std::span<const uint8_t> value, Interface::ValueType type);
+    void showResultsContextMenu(const QPoint &position);
+    void viewRegion(const FoundOccurrences &occurrence);
     void finishUnhook();
 
     class RpcClient
