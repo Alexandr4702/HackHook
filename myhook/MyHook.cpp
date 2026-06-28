@@ -1,8 +1,10 @@
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <fstream>
 #include <thread>
 #include <string>
+#include <string_view>
 #include <sstream>
 #include <iomanip>
 #include <array>
@@ -28,6 +30,145 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK HookProc(int code, WPARAM wPar
 
 namespace
 {
+struct RegionMetadata
+{
+    bool available = false;
+    uint64_t address = 0;
+    uint64_t baseAddress = 0;
+    uint64_t allocationBase = 0;
+    uint32_t allocationProtect = 0;
+    uint64_t regionSize = 0;
+    uint32_t state = 0;
+    uint32_t protect = 0;
+    uint32_t type = 0;
+    uint64_t moduleBase = 0;
+    uint64_t moduleSize = 0;
+    std::string moduleName;
+    std::string modulePath;
+    std::string mappedPath;
+    bool isHeap = false;
+    uint64_t heapHandle = 0;
+    uint64_t heapBlock = 0;
+    uint64_t heapBlockSize = 0;
+    uint32_t heapFlags = 0;
+    bool workingSetQueried = false;
+    bool workingSetValid = false;
+    uint32_t workingSetProtect = 0;
+    uint32_t numaNode = 0;
+    uint32_t shareCount = 0;
+    bool shared = false;
+    bool locked = false;
+    bool largePage = false;
+    bool bad = false;
+};
+
+std::string utf8(std::wstring_view text)
+{
+    if (text.empty())
+        return {};
+
+    const int size = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0,
+                                         nullptr, nullptr);
+    if (size <= 0)
+        return {};
+
+    std::string result(static_cast<size_t>(size), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), result.data(), size, nullptr,
+                        nullptr);
+    return result;
+}
+
+RegionMetadata query_region_metadata(uintptr_t address)
+{
+    RegionMetadata result;
+    result.address = address;
+
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (VirtualQuery(reinterpret_cast<const void *>(address), &mbi, sizeof(mbi)) != sizeof(mbi))
+        return result;
+
+    result.available = true;
+    result.baseAddress = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+    result.allocationBase = reinterpret_cast<uintptr_t>(mbi.AllocationBase);
+    result.allocationProtect = mbi.AllocationProtect;
+    result.regionSize = mbi.RegionSize;
+    result.state = mbi.State;
+    result.protect = mbi.Protect;
+    result.type = mbi.Type;
+
+    HMODULE module = nullptr;
+    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCWSTR>(address), &module))
+    {
+        MODULEINFO moduleInfo{};
+        if (GetModuleInformation(GetCurrentProcess(), module, &moduleInfo, sizeof(moduleInfo)))
+        {
+            result.moduleBase = reinterpret_cast<uintptr_t>(moduleInfo.lpBaseOfDll);
+            result.moduleSize = moduleInfo.SizeOfImage;
+        }
+
+        std::array<wchar_t, 32768> path{};
+        const DWORD length = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
+        if (length != 0 && length < path.size())
+        {
+            std::wstring_view fullPath(path.data(), length);
+            result.modulePath = utf8(fullPath);
+            const size_t separator = fullPath.find_last_of(L"\\/");
+            result.moduleName = utf8(fullPath.substr(separator == std::wstring_view::npos ? 0 : separator + 1));
+        }
+    }
+
+    std::array<wchar_t, 32768> mappedPath{};
+    const DWORD mappedLength = GetMappedFileNameW(GetCurrentProcess(), reinterpret_cast<void *>(address),
+                                                   mappedPath.data(), static_cast<DWORD>(mappedPath.size()));
+    if (mappedLength != 0 && mappedLength < mappedPath.size())
+        result.mappedPath = utf8(std::wstring_view(mappedPath.data(), mappedLength));
+
+    const DWORD heapCount = mbi.Type == MEM_PRIVATE ? GetProcessHeaps(0, nullptr) : 0;
+    if (heapCount != 0)
+    {
+        std::vector<HANDLE> heaps(heapCount);
+        const DWORD returned = GetProcessHeaps(heapCount, heaps.data());
+        for (DWORD i = 0; i < std::min(heapCount, returned) && !result.isHeap; ++i)
+        {
+            PROCESS_HEAP_ENTRY entry{};
+            while (HeapWalk(heaps[i], &entry))
+            {
+                const uintptr_t block = reinterpret_cast<uintptr_t>(entry.lpData);
+                if (address >= block && address - block < entry.cbData)
+                {
+                    result.isHeap = true;
+                    result.heapHandle = reinterpret_cast<uintptr_t>(heaps[i]);
+                    result.heapBlock = block;
+                    result.heapBlockSize = entry.cbData;
+                    result.heapFlags = entry.wFlags;
+                    break;
+                }
+            }
+        }
+    }
+
+    PSAPI_WORKING_SET_EX_INFORMATION workingSet{};
+    workingSet.VirtualAddress = reinterpret_cast<void *>(address);
+    if (QueryWorkingSetEx(GetCurrentProcess(), &workingSet, sizeof(workingSet)))
+    {
+        result.workingSetQueried = true;
+        result.workingSetValid = workingSet.VirtualAttributes.Valid;
+        result.shared = workingSet.VirtualAttributes.Shared;
+        result.bad = workingSet.VirtualAttributes.Bad;
+        if (result.workingSetValid)
+        {
+            result.workingSetProtect = workingSet.VirtualAttributes.Win32Protection;
+            result.numaNode = workingSet.VirtualAttributes.Node;
+            result.shareCount = workingSet.VirtualAttributes.ShareCount;
+            result.locked = workingSet.VirtualAttributes.Locked;
+            result.largePage = workingSet.VirtualAttributes.LargePage;
+        }
+    }
+
+    return result;
+}
+
 void report_boundary_error(Logger *logger, const char *boundary, const char *details = nullptr) noexcept
 {
     if (logger)
@@ -265,7 +406,7 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
     }
     case Interface::CommandID_READ: {
         const auto *cmd = msg->body_as_ReadCommand();
-        if (!cmd || cmd->size() > BUFFER_CAPACITY - 1024)
+        if (!cmd || cmd->size() > MAX_READ_SIZE)
         {
             LOG(m_log, "READ command: invalid payload or size");
             m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_NACK,
@@ -282,11 +423,54 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
 
         std::pmr::vector<uint8_t> readed_data(cmd->size(), &m_pool);
         auto readed = m_memTool->read(cmd->offset(), readed_data.data(), cmd->size());
-        auto read_ack_func = [data = std::move(readed_data), readed](flatbuffers::FlatBufferBuilder &builder) -> flatbuffers::Offset<Interface::ReadAck> {
+        auto read_ack_func = [data = std::move(readed_data), readed](flatbuffers::FlatBufferBuilder &builder) {
             return Interface::CreateReadAck(builder, builder.CreateVector(data.data(), readed));
         };
         m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_READ_ACK,
                               Interface::Command::Command_ReadAck, read_ack_func);
+        break;
+    }
+    case Interface::CommandID_REGION_READ: {
+        const auto *cmd = msg->body_as_RegionReadCommand();
+        if (!cmd || cmd->size() > MAX_REGION_READ_SIZE)
+        {
+            LOG(m_log, "REGION_READ command: invalid payload or size");
+            m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_NACK,
+                                  Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+            break;
+        }
+        if (!m_memTool)
+        {
+            m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_NACK,
+                                  Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+            break;
+        }
+
+        std::pmr::vector<uint8_t> readed_data(cmd->size(), &m_pool);
+        const auto readed = m_memTool->read(cmd->offset(), readed_data.data(), cmd->size());
+        const uintptr_t metadataAddress = cmd->metadata_address() != 0 ? cmd->metadata_address() : cmd->offset();
+        auto metadata = query_region_metadata(metadataAddress);
+        auto read_ack_func = [data = std::move(readed_data), readed, metadata = std::move(metadata)](
+                                 flatbuffers::FlatBufferBuilder &builder) {
+            flatbuffers::Offset<Interface::MemoryRegionInfo> region;
+            if (metadata.available)
+            {
+                const auto moduleName = builder.CreateString(metadata.moduleName);
+                const auto modulePath = builder.CreateString(metadata.modulePath);
+                const auto mappedPath = builder.CreateString(metadata.mappedPath);
+                region = Interface::CreateMemoryRegionInfo(
+                    builder, metadata.address, metadata.baseAddress, metadata.allocationBase,
+                    metadata.allocationProtect, metadata.regionSize, metadata.state, metadata.protect, metadata.type,
+                    metadata.moduleBase, metadata.moduleSize, moduleName, modulePath, mappedPath, metadata.isHeap,
+                    metadata.heapHandle, metadata.heapBlock, metadata.heapBlockSize, metadata.heapFlags,
+                    metadata.workingSetQueried, metadata.workingSetValid, metadata.workingSetProtect,
+                    metadata.numaNode, metadata.shareCount, metadata.shared, metadata.locked, metadata.largePage,
+                    metadata.bad);
+            }
+            return Interface::CreateRegionReadAck(builder, builder.CreateVector(data.data(), readed), region);
+        };
+        m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_REGION_READ_ACK,
+                              Interface::Command::Command_RegionReadAck, read_ack_func);
         break;
     }
     case Interface::CommandID_DUMP: {

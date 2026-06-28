@@ -17,6 +17,7 @@ add_executable(gui_app
     OccurrenceColors.h
     RegionViewDialog.cpp
     RegionViewDialog.h
+    RegionViewDialog.ui
     WindowSelectorCombo.h
     mainwindow.ui
 )

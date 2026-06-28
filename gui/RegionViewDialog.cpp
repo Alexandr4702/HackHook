@@ -1,18 +1,16 @@
 #include "RegionViewDialog.h"
 #include "OccurrenceColors.h"
+#include "common/utility.h"
+#include "ui_RegionViewDialog.h"
 #include <QAbstractTableModel>
-#include <QComboBox>
 #include <QFileDialog>
 #include <QFontDatabase>
 #include <QHeaderView>
-#include <QHBoxLayout>
-#include <QLabel>
 #include <QMessageBox>
-#include <QPushButton>
 #include <QSaveFile>
 #include <QShortcut>
-#include <QTableView>
-#include <QVBoxLayout>
+#include <QStyledItemDelegate>
+#include <QTreeWidget>
 #include <algorithm>
 
 namespace
@@ -32,6 +30,216 @@ QString safeFileName(QString name)
         name.chop(1);
 
     return name.isEmpty() ? QStringLiteral("window") : name;
+}
+
+QString hexValue(uint64_t value)
+{
+    return QString("0x%1").arg(value, 0, 16);
+}
+
+QString memoryState(uint32_t state)
+{
+    switch (state)
+    {
+    case 0x1000:
+        return QStringLiteral("Commit");
+    case 0x2000:
+        return QStringLiteral("Reserve");
+    case 0x10000:
+        return QStringLiteral("Free");
+    default:
+        return QStringLiteral("Unknown");
+    }
+}
+
+QString memoryType(uint32_t type)
+{
+    switch (type)
+    {
+    case 0x20000:
+        return QStringLiteral("Private");
+    case 0x40000:
+        return QStringLiteral("Mapped");
+    case 0x1000000:
+        return QStringLiteral("Image");
+    default:
+        return QStringLiteral("Unknown");
+    }
+}
+
+QString memoryProtection(uint32_t protection)
+{
+    QStringList flags;
+    switch (protection & 0xff)
+    {
+    case 0x01:
+        flags << QStringLiteral("No access");
+        break;
+    case 0x02:
+        flags << QStringLiteral("Read");
+        break;
+    case 0x04:
+        flags << QStringLiteral("Read/Write");
+        break;
+    case 0x08:
+        flags << QStringLiteral("Copy-on-write");
+        break;
+    case 0x10:
+        flags << QStringLiteral("Execute");
+        break;
+    case 0x20:
+        flags << QStringLiteral("Execute/Read");
+        break;
+    case 0x40:
+        flags << QStringLiteral("Execute/Read/Write");
+        break;
+    case 0x80:
+        flags << QStringLiteral("Execute/Copy-on-write");
+        break;
+    default:
+        flags << QStringLiteral("Unknown");
+        break;
+    }
+    if (protection & 0x100)
+        flags << QStringLiteral("Guard");
+    if (protection & 0x200)
+        flags << QStringLiteral("No cache");
+    if (protection & 0x400)
+        flags << QStringLiteral("Write combine");
+    if (protection & 0x40000000)
+        flags << QStringLiteral("Targets invalid");
+    return flags.join(QStringLiteral(" | "));
+}
+
+QString heapFlags(uint32_t flags)
+{
+    QStringList values;
+    if (flags & 0x1)
+        values << QStringLiteral("Region");
+    if (flags & 0x2)
+        values << QStringLiteral("Uncommitted range");
+    if (flags & 0x4)
+        values << QStringLiteral("Busy");
+    if (flags & 0x10)
+        values << QStringLiteral("Moveable");
+    if (flags & 0x20)
+        values << QStringLiteral("DDE shared");
+    return values.isEmpty() ? QStringLiteral("None") : values.join(QStringLiteral(" | "));
+}
+
+QString yesNo(bool value)
+{
+    return value ? QStringLiteral("Yes") : QStringLiteral("No");
+}
+
+QString occurrenceValue(const FoundOccurrences &occurrence, const std::vector<uint8_t> &regionData)
+{
+    if (occurrence.offset >= regionData.size() || occurrence.data_size > regionData.size() - occurrence.offset)
+        return QStringLiteral("<unavailable>");
+
+    const auto *begin = regionData.data() + static_cast<size_t>(occurrence.offset);
+    const auto bytes = std::span<const uint8_t>(begin, static_cast<size_t>(occurrence.data_size));
+    const std::string decoded = valueToString(bytes, static_cast<Interface::ValueType>(occurrence.type));
+    QString value = QString::fromUtf8(decoded.data(), static_cast<qsizetype>(decoded.size()));
+    for (qsizetype i = 0; i < value.size(); ++i)
+    {
+        if (!value[i].isPrint())
+            value[i] = QLatin1Char('.');
+    }
+
+    constexpr qsizetype maxLength = 80;
+    if (value.size() > maxLength)
+        value = value.left(maxLength - 3) + QStringLiteral("...");
+    return value.isEmpty() ? QStringLiteral("<empty>") : value;
+}
+
+class MatchComboDelegate final : public QStyledItemDelegate
+{
+  public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+  protected:
+    void initStyleOption(QStyleOptionViewItem *option, const QModelIndex &index) const override
+    {
+        QStyledItemDelegate::initStyleOption(option, index);
+        const QColor color = index.data(Qt::BackgroundRole).value<QColor>();
+        if (!color.isValid())
+            return;
+
+        option->backgroundBrush = color;
+        option->palette.setColor(QPalette::Base, color);
+        option->palette.setColor(QPalette::Highlight, color);
+        option->palette.setColor(QPalette::Text, Qt::black);
+        option->palette.setColor(QPalette::HighlightedText, Qt::black);
+    }
+};
+
+void populateRegionProperties(QTreeWidget *properties, const MemoryRegionDetails &details)
+{
+    properties->clear();
+    auto addProperty = [properties](const QString &name, const QString &value) {
+        auto *item = new QTreeWidgetItem(properties, {name, value});
+        item->setToolTip(1, value);
+    };
+
+    if (!details.available)
+    {
+        addProperty(RegionViewDialog::tr("Metadata"), RegionViewDialog::tr("Unavailable"));
+        return;
+    }
+
+    addProperty(RegionViewDialog::tr("Query address"), hexValue(details.address));
+    addProperty(RegionViewDialog::tr("Region base"), hexValue(details.baseAddress));
+    addProperty(RegionViewDialog::tr("Region end"), hexValue(details.baseAddress + details.regionSize));
+    addProperty(RegionViewDialog::tr("Region size"),
+                QString("%1 (%2 bytes)").arg(hexValue(details.regionSize)).arg(details.regionSize));
+    addProperty(RegionViewDialog::tr("Allocation base"), hexValue(details.allocationBase));
+    addProperty(RegionViewDialog::tr("State"),
+                QString("%1 (%2)").arg(memoryState(details.state), hexValue(details.state)));
+    addProperty(RegionViewDialog::tr("Type"),
+                QString("%1 (%2)").arg(memoryType(details.type), hexValue(details.type)));
+    addProperty(RegionViewDialog::tr("Protection"),
+                QString("%1 (%2)").arg(memoryProtection(details.protect), hexValue(details.protect)));
+    addProperty(RegionViewDialog::tr("Allocation protection"),
+                QString("%1 (%2)")
+                    .arg(memoryProtection(details.allocationProtect), hexValue(details.allocationProtect)));
+    addProperty(RegionViewDialog::tr("Module"), details.moduleName.isEmpty() ? QStringLiteral("-") : details.moduleName);
+    addProperty(RegionViewDialog::tr("Module base"),
+                details.moduleBase == 0 ? QStringLiteral("-") : hexValue(details.moduleBase));
+    addProperty(RegionViewDialog::tr("Module size"),
+                details.moduleSize == 0 ? QStringLiteral("-") : QString::number(details.moduleSize));
+    addProperty(RegionViewDialog::tr("Module path"),
+                details.modulePath.isEmpty() ? QStringLiteral("-") : details.modulePath);
+    addProperty(RegionViewDialog::tr("Mapped path"),
+                details.mappedPath.isEmpty() ? QStringLiteral("-") : details.mappedPath);
+    addProperty(RegionViewDialog::tr("Heap block (best effort)"), yesNo(details.isHeap));
+    if (details.isHeap)
+    {
+        addProperty(RegionViewDialog::tr("Heap handle"), hexValue(details.heapHandle));
+        addProperty(RegionViewDialog::tr("Heap block"), hexValue(details.heapBlock));
+        addProperty(RegionViewDialog::tr("Heap block size"), QString::number(details.heapBlockSize));
+        addProperty(RegionViewDialog::tr("Heap flags"),
+                    QString("%1 (%2)").arg(heapFlags(details.heapFlags), hexValue(details.heapFlags)));
+    }
+    addProperty(RegionViewDialog::tr("Working set query"),
+                details.workingSetQueried ? RegionViewDialog::tr("Available")
+                                          : RegionViewDialog::tr("Unavailable"));
+    if (details.workingSetQueried)
+    {
+        addProperty(RegionViewDialog::tr("Resident"), yesNo(details.workingSetValid));
+        addProperty(RegionViewDialog::tr("Shared"), yesNo(details.shared));
+        addProperty(RegionViewDialog::tr("Bad page"), yesNo(details.bad));
+        if (details.workingSetValid)
+        {
+            addProperty(RegionViewDialog::tr("Working set protection"),
+                        QString("%1 (%2)")
+                            .arg(memoryProtection(details.workingSetProtect), hexValue(details.workingSetProtect)));
+            addProperty(RegionViewDialog::tr("NUMA node"), QString::number(details.numaNode));
+            addProperty(RegionViewDialog::tr("Share count"), QString::number(details.shareCount));
+            addProperty(RegionViewDialog::tr("Locked"), yesNo(details.locked));
+            addProperty(RegionViewDialog::tr("Large page"), yesNo(details.largePage));
+        }
+    }
 }
 
 class RegionHexModel final : public QAbstractTableModel
@@ -136,6 +344,18 @@ class RegionHexModel final : public QAbstractTableModel
         return m_data;
     }
 
+    const std::vector<FoundOccurrences> &occurrences() const noexcept
+    {
+        return m_occurrences;
+    }
+
+    void replaceData(std::vector<uint8_t> data)
+    {
+        beginResetModel();
+        m_data = std::move(data);
+        endResetModel();
+    }
+
     QModelIndex occurrenceIndex(size_t occurrenceIndex) const
     {
         if (occurrenceIndex >= m_occurrences.size())
@@ -159,23 +379,25 @@ class RegionHexModel final : public QAbstractTableModel
 
 RegionViewDialog::RegionViewDialog(FoundOccurrences selectedOccurrence,
                                    std::vector<FoundOccurrences> regionOccurrences, std::vector<uint8_t> data,
-                                   QString windowName, QWidget *parent)
-    : QDialog(parent)
+                                   MemoryRegionDetails details, QString windowName, QWidget *parent)
+    : QDialog(parent), ui(new Ui::RegionViewDialog), m_selectedOccurrence(selectedOccurrence)
 {
+    ui->setupUi(this);
     setAttribute(Qt::WA_DeleteOnClose);
     setWindowTitle(QString("Region 0x%1").arg(selectedOccurrence.baseAddress, 0, 16));
-    resize(900, 600);
 
-    auto *layout = new QVBoxLayout(this);
-    auto *details = new QLabel(
+    ui->summaryLabel->setText(
         QString("Base: 0x%1    Region size: %2    Read: %3    Matches: %4    Selected offset: %5")
             .arg(selectedOccurrence.baseAddress, 0, 16)
             .arg(selectedOccurrence.region_size)
             .arg(data.size())
             .arg(regionOccurrences.size())
-            .arg(selectedOccurrence.offset),
-        this);
-    layout->addWidget(details);
+            .arg(selectedOccurrence.offset));
+
+    auto *properties = ui->propertiesTree;
+    populateRegionProperties(properties, details);
+    properties->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    properties->header()->setSectionResizeMode(1, QHeaderView::Stretch);
 
     size_t selectedIndex = 0;
     for (size_t i = 0; i < regionOccurrences.size(); ++i)
@@ -190,42 +412,38 @@ RegionViewDialog::RegionViewDialog(FoundOccurrences selectedOccurrence,
         }
     }
 
-    auto *navigationLayout = new QHBoxLayout;
-    auto *previousButton = new QPushButton(tr("Previous"), this);
-    auto *matchCombo = new QComboBox(this);
-    auto *nextButton = new QPushButton(tr("Next"), this);
+    auto *previousButton = ui->previousButton;
+    auto *matchCombo = ui->matchCombo;
+    auto *nextButton = ui->nextButton;
+    matchCombo->setItemDelegate(new MatchComboDelegate(matchCombo));
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+    matchCombo->setLabelDrawingMode(QComboBox::LabelDrawingMode::UseDelegate);
+#endif
     for (size_t i = 0; i < regionOccurrences.size(); ++i)
     {
         const auto &occurrence = regionOccurrences[i];
-        matchCombo->addItem(QString("Match %1 — 0x%2 (+%3), %4 bytes")
+        matchCombo->addItem(QString("Match %1 | %2 | 0x%3 (+%4), %5 bytes")
                                 .arg(i + 1)
+                                .arg(occurrenceValue(occurrence, data))
                                 .arg(occurrence.baseAddress + occurrence.offset, 0, 16)
                                 .arg(occurrence.offset)
                                 .arg(occurrence.data_size));
         matchCombo->setItemData(static_cast<int>(i), occurrenceColor(i), Qt::BackgroundRole);
         matchCombo->setItemData(static_cast<int>(i), QColor(Qt::black), Qt::ForegroundRole);
     }
-    matchCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     previousButton->setEnabled(regionOccurrences.size() > 1);
     nextButton->setEnabled(regionOccurrences.size() > 1);
-    navigationLayout->addWidget(previousButton);
-    navigationLayout->addWidget(matchCombo, 1);
-    navigationLayout->addWidget(nextButton);
-    layout->addLayout(navigationLayout);
 
-    auto *table = new QTableView(this);
+    auto *table = ui->regionTable;
     auto *model = new RegionHexModel(std::move(regionOccurrences), std::move(data), table);
+    m_model = model;
     table->setModel(model);
     table->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-    table->setSelectionBehavior(QAbstractItemView::SelectItems);
-    table->setSelectionMode(QAbstractItemView::SingleSelection);
-    table->setAlternatingRowColors(true);
     table->verticalHeader()->setVisible(false);
     table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     for (int column = 1; column <= bytesPerRow; ++column)
         table->horizontalHeader()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
     table->horizontalHeader()->setSectionResizeMode(bytesPerRow + 1, QHeaderView::Stretch);
-    layout->addWidget(table);
 
     auto navigateTo = [table, model](int index) {
         const QModelIndex match = model->occurrenceIndex(static_cast<size_t>(index));
@@ -248,8 +466,9 @@ RegionViewDialog::RegionViewDialog(FoundOccurrences selectedOccurrence,
     auto *previousShortcut = new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F3), this);
     connect(nextShortcut, &QShortcut::activated, nextButton, &QPushButton::click);
     connect(previousShortcut, &QShortcut::activated, previousButton, &QPushButton::click);
+    connect(ui->updateButton, &QPushButton::clicked, this, &RegionViewDialog::updateRequested);
 
-    auto *saveButton = new QPushButton(tr("Save binary..."), this);
+    auto *saveButton = ui->saveButton;
     connect(saveButton, &QPushButton::clicked, this,
             [this, model, selectedOccurrence, windowName = safeFileName(std::move(windowName))]() {
         const QString suggestedName =
@@ -274,8 +493,46 @@ RegionViewDialog::RegionViewDialog(FoundOccurrences selectedOccurrence,
         if (written != static_cast<qint64>(bytes.size()) || !file.commit())
             QMessageBox::warning(this, tr("Save binary"), tr("Failed to save the complete region."));
     });
-    layout->addWidget(saveButton, 0, Qt::AlignRight);
-
     matchCombo->setCurrentIndex(static_cast<int>(selectedIndex));
     navigateTo(static_cast<int>(selectedIndex));
+}
+
+RegionViewDialog::~RegionViewDialog()
+{
+    delete ui;
+}
+
+void RegionViewDialog::setRegionData(std::vector<uint8_t> data, MemoryRegionDetails details)
+{
+    auto *model = static_cast<RegionHexModel *>(m_model);
+    model->replaceData(std::move(data));
+    populateRegionProperties(ui->propertiesTree, details);
+
+    const auto &occurrences = model->occurrences();
+    const auto &bytes = model->bytes();
+    for (size_t i = 0; i < occurrences.size(); ++i)
+    {
+        const auto &occurrence = occurrences[i];
+        ui->matchCombo->setItemText(
+            static_cast<int>(i), QString("Match %1 | %2 | 0x%3 (+%4), %5 bytes")
+                                     .arg(i + 1)
+                                     .arg(occurrenceValue(occurrence, bytes))
+                                     .arg(occurrence.baseAddress + occurrence.offset, 0, 16)
+                                     .arg(occurrence.offset)
+                                     .arg(occurrence.data_size));
+    }
+
+    ui->summaryLabel->setText(
+        QString("Base: 0x%1    Region size: %2    Read: %3    Matches: %4    Selected offset: %5")
+            .arg(m_selectedOccurrence.baseAddress, 0, 16)
+            .arg(m_selectedOccurrence.region_size)
+            .arg(bytes.size())
+            .arg(occurrences.size())
+            .arg(m_selectedOccurrence.offset));
+}
+
+void RegionViewDialog::setUpdating(bool updating)
+{
+    ui->updateButton->setEnabled(!updating);
+    ui->updateButton->setText(updating ? tr("Updating...") : tr("Update"));
 }

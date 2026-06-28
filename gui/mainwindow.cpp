@@ -1,18 +1,17 @@
 #include "mainwindow.h"
 #include "MemoryCache.h"
-#include "OccurrenceColors.h"
 #include "RegionViewDialog.h"
 #include "interface_generated.h"
 #include "ui_mainwindow.h"
 #include <QMenu>
 #include <QMessageBox>
 #include <QMetaObject>
+#include <QPointer>
 #include <QTableWidgetItem>
 #include <atomic>
 #include <charconv>
 #include <cstdint>
 #include <exception>
-#include <map>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -250,6 +249,10 @@ void MainWindow::HandleMessage(const Interface::CommandEnvelope *msg)
         break;
     case Interface::CommandID_READ_ACK:
         qDebug() << "[HandleMessage] Received CommandID_READ_ACK command";
+        m_rpc_client.call_cb(msg->request_id(), msg);
+        break;
+    case Interface::CommandID_REGION_READ_ACK:
+        qDebug() << "[HandleMessage] Received CommandID_REGION_READ_ACK command";
         m_rpc_client.call_cb(msg->request_id(), msg);
         break;
     case Interface::CommandID_NACK:
@@ -633,13 +636,24 @@ void MainWindow::showResultsContextMenu(const QPoint &position)
     if (menu.exec(ui->resultsTable->viewport()->mapToGlobal(position)) == viewRegionAction)
     {
         std::vector<FoundOccurrences> regionOccurrences;
+        const uint64_t regionBase = occurrence.baseAddress;
+        const uint64_t regionSize = occurrence.region_size;
         for (const auto &view : m_occur_storage.views())
         {
-            if (view.occurrence.baseAddress == occurrence.baseAddress &&
-                view.occurrence.region_size == occurrence.region_size)
-            {
-                regionOccurrences.push_back(view.occurrence);
-            }
+            const auto &candidate = view.occurrence;
+            const uint64_t address = candidate.baseAddress + candidate.offset;
+            if (address < candidate.baseAddress || address < regionBase)
+                continue;
+
+            const uint64_t relativeOffset = address - regionBase;
+            if (relativeOffset >= regionSize || candidate.data_size > regionSize - relativeOffset)
+                continue;
+
+            FoundOccurrences normalized = candidate;
+            normalized.baseAddress = regionBase;
+            normalized.offset = relativeOffset;
+            normalized.region_size = regionSize;
+            regionOccurrences.push_back(normalized);
         }
         if (regionOccurrences.empty())
             regionOccurrences.push_back(occurrence);
@@ -650,42 +664,123 @@ void MainWindow::showResultsContextMenu(const QPoint &position)
 void MainWindow::viewRegion(const FoundOccurrences &occurrence,
                             std::vector<FoundOccurrences> regionOccurrences)
 {
-    if (occurrence.region_size == 0 || occurrence.region_size > BUFFER_CAPACITY - 1024)
+    requestRegionData(
+        occurrence,
+        [this, occurrence, regionOccurrences = std::move(regionOccurrences)](
+            std::vector<uint8_t> data, MemoryRegionDetails details) mutable {
+            auto *dialog = new RegionViewDialog(occurrence, std::move(regionOccurrences), std::move(data),
+                                                std::move(details), ui->windowSelectorCombo->currentText(), this);
+            QPointer<RegionViewDialog> guardedDialog(dialog);
+            connect(dialog, &RegionViewDialog::updateRequested, this, [this, guardedDialog, occurrence]() {
+                if (!guardedDialog)
+                    return;
+
+                guardedDialog->setUpdating(true);
+                auto finishUpdate = [guardedDialog]() {
+                    if (guardedDialog)
+                        guardedDialog->setUpdating(false);
+                };
+                requestRegionData(
+                    occurrence,
+                    [guardedDialog](std::vector<uint8_t> refreshedData, MemoryRegionDetails refreshedDetails) {
+                        if (!guardedDialog)
+                            return;
+                        guardedDialog->setRegionData(std::move(refreshedData), std::move(refreshedDetails));
+                        guardedDialog->setUpdating(false);
+                    },
+                    std::move(finishUpdate));
+            });
+            dialog->show();
+        });
+}
+
+bool MainWindow::requestRegionData(const FoundOccurrences &occurrence, RegionDataCallback done,
+                                   std::function<void()> failed)
+{
+    if (occurrence.region_size == 0 || occurrence.region_size > MAX_REGION_READ_SIZE)
     {
         QMessageBox::warning(this, tr("View region"),
                              tr("Region size %1 cannot be read in one IPC message.").arg(occurrence.region_size));
-        return;
+        if (failed)
+            failed();
+        return false;
     }
 
     const bool sent = m_rpc_client.send_rpc_cb(
-        [this, occurrence, regionOccurrences = std::move(regionOccurrences)](
+        [this, done = std::move(done), failed](
             const Interface::CommandEnvelope *msg) mutable {
-            if (!msg || msg->id() != Interface::CommandID_READ_ACK)
+            if (!msg || msg->id() != Interface::CommandID_REGION_READ_ACK)
             {
                 QMessageBox::warning(this, tr("View region"), tr("Failed to read the selected region."));
+                if (failed)
+                    failed();
                 return;
             }
 
-            const auto *ack = msg->body_as_ReadAck();
+            const auto *ack = msg->body_as_RegionReadAck();
             const auto *readData = ack ? ack->data() : nullptr;
             if (!readData)
             {
                 QMessageBox::warning(this, tr("View region"), tr("The selected region returned no data."));
+                if (failed)
+                    failed();
                 return;
             }
 
             std::vector<uint8_t> data;
             if (readData->size() != 0)
                 data.assign(readData->data(), readData->data() + readData->size());
-            auto *dialog = new RegionViewDialog(occurrence, std::move(regionOccurrences), std::move(data),
-                                                ui->windowSelectorCombo->currentText(), this);
-            dialog->show();
+
+            MemoryRegionDetails details;
+            if (const auto *region = ack->region())
+            {
+                auto stringFromBuffer = [](const flatbuffers::String *value) {
+                    return value ? QString::fromUtf8(value->c_str(), static_cast<qsizetype>(value->size()))
+                                 : QString{};
+                };
+                details.available = true;
+                details.address = region->address();
+                details.baseAddress = region->base_address();
+                details.allocationBase = region->allocation_base();
+                details.allocationProtect = region->allocation_protect();
+                details.regionSize = region->region_size();
+                details.state = region->state();
+                details.protect = region->protect();
+                details.type = region->type();
+                details.moduleBase = region->module_base();
+                details.moduleSize = region->module_size();
+                details.moduleName = stringFromBuffer(region->module_name());
+                details.modulePath = stringFromBuffer(region->module_path());
+                details.mappedPath = stringFromBuffer(region->mapped_path());
+                details.isHeap = region->is_heap();
+                details.heapHandle = region->heap_handle();
+                details.heapBlock = region->heap_block();
+                details.heapBlockSize = region->heap_block_size();
+                details.heapFlags = region->heap_flags();
+                details.workingSetQueried = region->working_set_queried();
+                details.workingSetValid = region->working_set_valid();
+                details.workingSetProtect = region->working_set_protect();
+                details.numaNode = region->numa_node();
+                details.shareCount = region->share_count();
+                details.shared = region->shared();
+                details.locked = region->locked();
+                details.largePage = region->large_page();
+                details.bad = region->bad();
+            }
+
+            done(std::move(data), std::move(details));
         },
-        Interface::CommandID_READ, Interface::Command::Command_ReadCommand, Interface::CreateReadCommand,
-        occurrence.baseAddress, occurrence.region_size);
+        Interface::CommandID_REGION_READ, Interface::Command::Command_RegionReadCommand,
+        Interface::CreateRegionReadCommand,
+        occurrence.baseAddress, occurrence.region_size, occurrence.baseAddress + occurrence.offset);
 
     if (!sent)
+    {
         QMessageBox::warning(this, tr("View region"), tr("Failed to send the region read request."));
+        if (failed)
+            failed();
+    }
+    return sent;
 }
 
 void MainWindow::printOccurences(const MemoryCache &occurences)
@@ -695,7 +790,6 @@ void MainWindow::printOccurences(const MemoryCache &occurences)
     table->clearContents();
     table->setRowCount(static_cast<int>(occurences.views().size()));
 
-    std::map<std::pair<uint64_t, uint64_t>, size_t> regionColorIndices;
     int row = 0;
     for (const auto &view : occurences.views())
     {
@@ -707,13 +801,8 @@ void MainWindow::printOccurences(const MemoryCache &occurences)
         const auto value_type = view.type();
         const auto type_index = static_cast<size_t>(value_type);
         const char *type_text = type_index < valueTypes.size() ? valueTypes[type_index].first : "Unknown";
-        const auto regionKey = std::pair{occur.baseAddress, occur.region_size};
-        const QColor color = occurrenceColor(regionColorIndices[regionKey]++);
-
         const auto value_text = valueToString(*data, value_type);
         auto *valueItem = new QTableWidgetItem(QString::fromStdString(value_text));
-        valueItem->setBackground(color);
-        valueItem->setForeground(Qt::black);
         valueItem->setData(baseAddressRole, QVariant::fromValue<qulonglong>(occur.baseAddress));
         valueItem->setData(offsetRole, QVariant::fromValue<qulonglong>(occur.offset));
         valueItem->setData(regionSizeRole, QVariant::fromValue<qulonglong>(occur.region_size));

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "WindowSelectorCombo.h"
+#include "RegionViewDialog.h"
 #include "common/common.h"
 #include "common/utility.h"
 #include "myhook/MemoryScanner.h"
@@ -53,6 +54,9 @@ class MainWindow : public QMainWindow
     void filterOccurrences(std::span<const uint8_t> value, Interface::ValueType type);
     void showResultsContextMenu(const QPoint &position);
     void viewRegion(const FoundOccurrences &occurrence, std::vector<FoundOccurrences> regionOccurrences);
+    using RegionDataCallback = std::function<void(std::vector<uint8_t>, MemoryRegionDetails)>;
+    bool requestRegionData(const FoundOccurrences &occurrence, RegionDataCallback done,
+                           std::function<void()> failed = {});
     void finishUnhook();
 
     class RpcClient
