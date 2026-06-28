@@ -5,10 +5,13 @@
 #include "ui_mainwindow.h"
 #include <QMenu>
 #include <QCloseEvent>
+#include <QHeaderView>
 #include <QMessageBox>
 #include <QMetaObject>
 #include <QPointer>
 #include <QTableWidgetItem>
+#include <QTime>
+#include <QTimer>
 #include <atomic>
 #include <charconv>
 #include <cstdint>
@@ -116,6 +119,52 @@ std::vector<uint8_t> string2data(const QString &text, int value_type)
     }
     return data;
 }
+
+QString valueTypeName(int type)
+{
+    const auto index = static_cast<size_t>(type);
+    return index < valueTypes.size() ? QString::fromUtf8(valueTypes[index].first) : QStringLiteral("Unknown");
+}
+
+QString memoryTypeName(uint32_t type)
+{
+    switch (type)
+    {
+    case MEM_PRIVATE:
+        return QStringLiteral("Private");
+    case MEM_MAPPED:
+        return QStringLiteral("Mapped");
+    case MEM_IMAGE:
+        return QStringLiteral("Image");
+    default:
+        return QString("0x%1").arg(type, 0, 16);
+    }
+}
+
+QString memoryProtectionName(uint32_t protection)
+{
+    QString value;
+    switch (protection & 0xff)
+    {
+    case PAGE_NOACCESS: value = QStringLiteral("No access"); break;
+    case PAGE_READONLY: value = QStringLiteral("Read"); break;
+    case PAGE_READWRITE: value = QStringLiteral("Read/Write"); break;
+    case PAGE_WRITECOPY: value = QStringLiteral("Copy-on-write"); break;
+    case PAGE_EXECUTE: value = QStringLiteral("Execute"); break;
+    case PAGE_EXECUTE_READ: value = QStringLiteral("Execute/Read"); break;
+    case PAGE_EXECUTE_READWRITE: value = QStringLiteral("Execute/Read/Write"); break;
+    case PAGE_EXECUTE_WRITECOPY: value = QStringLiteral("Execute/Copy-on-write"); break;
+    default: value = QString("0x%1").arg(protection, 0, 16); break;
+    }
+    if (protection & PAGE_GUARD)
+        value += QStringLiteral(" | Guard");
+    return value;
+}
+
+QString updatedStatus()
+{
+    return MainWindow::tr("Updated %1").arg(QTime::currentTime().toString(QStringLiteral("HH:mm:ss")));
+}
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow), m_rpc_client(m_sender)
@@ -127,6 +176,41 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     ui->resultsTable->setContextMenuPolicy(Qt::CustomContextMenu);
     ui->resultsTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     connect(ui->resultsTable, &QTableWidget::customContextMenuRequested, this, &MainWindow::showResultsContextMenu);
+    for (auto *table : {ui->valueWatchTable, ui->regionWatchTable})
+    {
+        table->setContextMenuPolicy(Qt::CustomContextMenu);
+        table->setSelectionBehavior(QAbstractItemView::SelectRows);
+        table->setSelectionMode(QAbstractItemView::SingleSelection);
+        table->horizontalHeader()->setStretchLastSection(true);
+    }
+    connect(ui->valueWatchTable, &QTableWidget::customContextMenuRequested, this,
+            &MainWindow::showValueWatchContextMenu);
+    connect(ui->regionWatchTable, &QTableWidget::customContextMenuRequested, this,
+            &MainWindow::showRegionWatchContextMenu);
+    connect(ui->regionWatchTable, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
+        if (m_hookReady && !m_unhookPending && m_injector.isHooked() && row >= 0 &&
+            static_cast<size_t>(row) < m_regionWatches.size())
+            viewRegion(m_regionWatches[static_cast<size_t>(row)].occurrence,
+                       {m_regionWatches[static_cast<size_t>(row)].occurrence});
+    });
+    m_watchTimer = new QTimer(this);
+    connect(m_watchTimer, &QTimer::timeout, this, &MainWindow::refreshWatches);
+    connect(ui->watchRefreshButton, &QPushButton::clicked, this, &MainWindow::refreshWatches);
+    connect(ui->watchAutoRefreshCheck, &QCheckBox::toggled, this, [this](bool enabled) {
+        if (enabled)
+        {
+            m_watchTimer->start(ui->watchIntervalSpin->value());
+            refreshWatches();
+        }
+        else
+        {
+            m_watchTimer->stop();
+        }
+    });
+    connect(ui->watchIntervalSpin, &QSpinBox::valueChanged, this, [this](int interval) {
+        if (m_watchTimer->isActive())
+            m_watchTimer->start(interval);
+    });
     for (const auto &[text, type] : valueTypes)
     {
         ui->valueTypeCombo->addItem(text, static_cast<int>(type));
@@ -695,8 +779,19 @@ void MainWindow::showResultsContextMenu(const QPoint &position)
     ui->resultsTable->selectRow(row);
     QMenu menu(this);
     QAction *viewRegionAction = menu.addAction(tr("View region"));
+    QAction *addValueWatchAction = menu.addAction(tr("Add value to watch"));
+    QAction *addRegionWatchAction = menu.addAction(tr("Add region to watch"));
     viewRegionAction->setEnabled(m_hookReady && !m_unhookPending && m_injector.isHooked());
-    if (menu.exec(ui->resultsTable->viewport()->mapToGlobal(position)) == viewRegionAction)
+    QAction *selectedAction = menu.exec(ui->resultsTable->viewport()->mapToGlobal(position));
+    if (selectedAction == addValueWatchAction)
+    {
+        addValueWatch(occurrence);
+    }
+    else if (selectedAction == addRegionWatchAction)
+    {
+        addRegionWatch(occurrence);
+    }
+    else if (selectedAction == viewRegionAction)
     {
         std::vector<FoundOccurrences> regionOccurrences;
         const uint64_t regionBase = occurrence.baseAddress;
@@ -721,6 +816,268 @@ void MainWindow::showResultsContextMenu(const QPoint &position)
         if (regionOccurrences.empty())
             regionOccurrences.push_back(occurrence);
         viewRegion(occurrence, std::move(regionOccurrences));
+    }
+}
+
+void MainWindow::addValueWatch(const FoundOccurrences &occurrence)
+{
+    const uint64_t address = occurrence.baseAddress + occurrence.offset;
+    const auto duplicate = std::ranges::find_if(m_valueWatches, [address](const FoundOccurrences &entry) {
+        return entry.baseAddress + entry.offset == address;
+    });
+    if (duplicate != m_valueWatches.end())
+    {
+        ui->valueWatchTable->selectRow(static_cast<int>(std::distance(m_valueWatches.begin(), duplicate)));
+        return;
+    }
+
+    m_valueWatches.push_back(occurrence);
+    updateValueWatchRow(m_valueWatches.size() - 1, QStringLiteral("-"), tr("Pending"));
+    refreshWatches();
+}
+
+void MainWindow::addRegionWatch(const FoundOccurrences &occurrence)
+{
+    const auto duplicate = std::ranges::find_if(m_regionWatches, [&occurrence](const RegionWatch &entry) {
+        return entry.occurrence.baseAddress == occurrence.baseAddress;
+    });
+    if (duplicate != m_regionWatches.end())
+    {
+        ui->regionWatchTable->selectRow(static_cast<int>(std::distance(m_regionWatches.begin(), duplicate)));
+        return;
+    }
+
+    m_regionWatches.push_back(RegionWatch{occurrence, {}});
+    updateRegionWatchRow(m_regionWatches.size() - 1, nullptr, tr("Pending"));
+    refreshWatches();
+}
+
+void MainWindow::showValueWatchContextMenu(const QPoint &position)
+{
+    auto *item = ui->valueWatchTable->itemAt(position);
+    if (!item)
+        return;
+
+    const int row = item->row();
+    QMenu menu(this);
+    QAction *removeAction = menu.addAction(tr("Remove from watch"));
+    if (menu.exec(ui->valueWatchTable->viewport()->mapToGlobal(position)) != removeAction)
+        return;
+    if (row < 0 || static_cast<size_t>(row) >= m_valueWatches.size())
+        return;
+
+    m_valueWatches.erase(m_valueWatches.begin() + row);
+    ui->valueWatchTable->removeRow(row);
+}
+
+void MainWindow::showRegionWatchContextMenu(const QPoint &position)
+{
+    auto *item = ui->regionWatchTable->itemAt(position);
+    if (!item)
+        return;
+
+    const int row = item->row();
+    if (row < 0 || static_cast<size_t>(row) >= m_regionWatches.size())
+        return;
+
+    QMenu menu(this);
+    QAction *viewAction = menu.addAction(tr("View region"));
+    QAction *removeAction = menu.addAction(tr("Remove from watch"));
+    viewAction->setEnabled(m_hookReady && !m_unhookPending && m_injector.isHooked());
+    QAction *selectedAction = menu.exec(ui->regionWatchTable->viewport()->mapToGlobal(position));
+    if (selectedAction == viewAction)
+    {
+        const auto occurrence = m_regionWatches[static_cast<size_t>(row)].occurrence;
+        viewRegion(occurrence, {occurrence});
+    }
+    else if (selectedAction == removeAction)
+    {
+        m_regionWatches.erase(m_regionWatches.begin() + row);
+        ui->regionWatchTable->removeRow(row);
+    }
+}
+
+void MainWindow::updateValueWatchRow(size_t index, const QString &value, const QString &status)
+{
+    if (index >= m_valueWatches.size())
+        return;
+
+    auto *table = ui->valueWatchTable;
+    if (table->rowCount() <= static_cast<int>(index))
+        table->setRowCount(static_cast<int>(index + 1));
+
+    const auto &occurrence = m_valueWatches[index];
+    const int row = static_cast<int>(index);
+    table->setItem(row, 0,
+                   new QTableWidgetItem(QString("0x%1").arg(occurrence.baseAddress + occurrence.offset, 0, 16)));
+    table->setItem(row, 1, new QTableWidgetItem(value));
+    table->setItem(row, 2, new QTableWidgetItem(valueTypeName(occurrence.type)));
+    table->setItem(row, 3, new QTableWidgetItem(status));
+}
+
+void MainWindow::updateRegionWatchRow(size_t index, const MemoryRegionDetails *details, const QString &status)
+{
+    if (index >= m_regionWatches.size())
+        return;
+
+    auto &watch = m_regionWatches[index];
+    if (details)
+        watch.details = *details;
+
+    auto *table = ui->regionWatchTable;
+    if (table->rowCount() <= static_cast<int>(index))
+        table->setRowCount(static_cast<int>(index + 1));
+
+    const int row = static_cast<int>(index);
+    const uint64_t base = watch.details.available ? watch.details.baseAddress : watch.occurrence.baseAddress;
+    const uint64_t size = watch.details.available ? watch.details.regionSize : watch.occurrence.region_size;
+    table->setItem(row, 0, new QTableWidgetItem(QString("0x%1").arg(base, 0, 16)));
+    table->setItem(row, 1, new QTableWidgetItem(QString::number(size)));
+    table->setItem(row, 2, new QTableWidgetItem(watch.details.available
+                                                    ? memoryProtectionName(watch.details.protect)
+                                                    : QStringLiteral("-")));
+    table->setItem(row, 3, new QTableWidgetItem(watch.details.available
+                                                    ? memoryTypeName(watch.details.type)
+                                                    : QStringLiteral("-")));
+    table->setItem(row, 4, new QTableWidgetItem(watch.details.available && !watch.details.moduleName.isEmpty()
+                                                    ? watch.details.moduleName
+                                                    : QStringLiteral("-")));
+    table->setItem(row, 5, new QTableWidgetItem(status));
+}
+
+void MainWindow::refreshWatches()
+{
+    if (m_watchRefreshInProgress)
+    {
+        m_watchRefreshQueued = true;
+        return;
+    }
+
+    if (!m_hookReady || m_unhookPending || !m_injector.isHooked())
+    {
+        for (size_t i = 0; i < m_valueWatches.size(); ++i)
+            updateValueWatchRow(i, ui->valueWatchTable->item(static_cast<int>(i), 1)
+                                       ? ui->valueWatchTable->item(static_cast<int>(i), 1)->text()
+                                       : QStringLiteral("-"),
+                                tr("Disconnected"));
+        for (size_t i = 0; i < m_regionWatches.size(); ++i)
+            updateRegionWatchRow(i, nullptr, tr("Disconnected"));
+        return;
+    }
+
+    m_pendingWatchRequests = m_valueWatches.size() + m_regionWatches.size();
+    if (m_pendingWatchRequests == 0)
+        return;
+
+    m_watchRefreshInProgress = true;
+    m_watchRefreshQueued = false;
+    ui->watchRefreshButton->setEnabled(false);
+
+    const auto valueWatches = m_valueWatches;
+    for (const auto &occurrence : valueWatches)
+    {
+        const uint64_t address = occurrence.baseAddress + occurrence.offset;
+        const bool validSize = occurrence.data_size != 0 && occurrence.data_size <= MAX_READ_SIZE;
+        const bool sent = validSize && m_rpc_client.send_rpc_cb(
+            [this, occurrence, address](const Interface::CommandEnvelope *msg) {
+                const auto current = std::ranges::find_if(m_valueWatches, [address](const FoundOccurrences &entry) {
+                    return entry.baseAddress + entry.offset == address;
+                });
+                if (current != m_valueWatches.end())
+                {
+                    const size_t index = static_cast<size_t>(std::distance(m_valueWatches.begin(), current));
+                    const auto *ack = msg && msg->id() == Interface::CommandID_READ_ACK ? msg->body_as_ReadAck() : nullptr;
+                    const auto *data = ack ? ack->data() : nullptr;
+                    if (data && data->size() == occurrence.data_size)
+                    {
+                        const std::span<const uint8_t> bytes(data->data(), data->size());
+                        updateValueWatchRow(index,
+                                            QString::fromStdString(valueToString(
+                                                bytes, static_cast<Interface::ValueType>(occurrence.type))),
+                                            updatedStatus());
+                    }
+                    else
+                    {
+                        const QString oldValue = ui->valueWatchTable->item(static_cast<int>(index), 1)
+                                                     ? ui->valueWatchTable->item(static_cast<int>(index), 1)->text()
+                                                     : QStringLiteral("-");
+                        updateValueWatchRow(index, oldValue, tr("Read failed"));
+                    }
+                }
+                finishWatchRequest();
+            },
+            Interface::CommandID_READ, Interface::Command::Command_ReadCommand, Interface::CreateReadCommand,
+            address, occurrence.data_size);
+        if (!sent)
+        {
+            const auto current = std::ranges::find_if(m_valueWatches, [address](const FoundOccurrences &entry) {
+                return entry.baseAddress + entry.offset == address;
+            });
+            if (current != m_valueWatches.end())
+            {
+                const size_t index = static_cast<size_t>(std::distance(m_valueWatches.begin(), current));
+                const QString oldValue = ui->valueWatchTable->item(static_cast<int>(index), 1)
+                                             ? ui->valueWatchTable->item(static_cast<int>(index), 1)->text()
+                                             : QStringLiteral("-");
+                updateValueWatchRow(index, oldValue, validSize ? tr("Send failed") : tr("Invalid size"));
+            }
+            finishWatchRequest();
+        }
+    }
+
+    const auto regionWatches = m_regionWatches;
+    for (const auto &watch : regionWatches)
+    {
+        const uint64_t base = watch.occurrence.baseAddress;
+        const bool sent = m_rpc_client.send_rpc_cb(
+            [this, base](const Interface::CommandEnvelope *msg) {
+                const auto current = std::ranges::find_if(m_regionWatches, [base](const RegionWatch &entry) {
+                    return entry.occurrence.baseAddress == base;
+                });
+                if (current != m_regionWatches.end())
+                {
+                    const size_t index = static_cast<size_t>(std::distance(m_regionWatches.begin(), current));
+                    const auto *ack = msg && msg->id() == Interface::CommandID_REGION_READ_ACK
+                                          ? msg->body_as_RegionReadAck()
+                                          : nullptr;
+                    const auto *region = ack ? ack->region() : nullptr;
+                    if (region)
+                    {
+                        const auto details = MemoryRegionDetails::fromFlatbuffer(region);
+                        updateRegionWatchRow(index, &details, updatedStatus());
+                    }
+                    else
+                    {
+                        updateRegionWatchRow(index, nullptr, tr("Read failed"));
+                    }
+                }
+                finishWatchRequest();
+            },
+            Interface::CommandID_REGION_READ, Interface::Command::Command_RegionReadCommand,
+            Interface::CreateRegionReadCommand, base, uint64_t{0}, base);
+        if (!sent)
+        {
+            const auto current = std::ranges::find_if(m_regionWatches, [base](const RegionWatch &entry) {
+                return entry.occurrence.baseAddress == base;
+            });
+            if (current != m_regionWatches.end())
+                updateRegionWatchRow(static_cast<size_t>(std::distance(m_regionWatches.begin(), current)), nullptr,
+                                     tr("Send failed"));
+            finishWatchRequest();
+        }
+    }
+}
+
+void MainWindow::finishWatchRequest()
+{
+    if (m_pendingWatchRequests != 0)
+        --m_pendingWatchRequests;
+    if (m_pendingWatchRequests == 0)
+    {
+        m_watchRefreshInProgress = false;
+        ui->watchRefreshButton->setEnabled(true);
+        if (m_watchRefreshQueued)
+            QTimer::singleShot(0, this, &MainWindow::refreshWatches);
     }
 }
 
@@ -794,42 +1151,7 @@ bool MainWindow::requestRegionData(const FoundOccurrences &occurrence, RegionDat
             if (readData->size() != 0)
                 data.assign(readData->data(), readData->data() + readData->size());
 
-            MemoryRegionDetails details;
-            if (const auto *region = ack->region())
-            {
-                auto stringFromBuffer = [](const flatbuffers::String *value) {
-                    return value ? QString::fromUtf8(value->c_str(), static_cast<qsizetype>(value->size()))
-                                 : QString{};
-                };
-                details.available = true;
-                details.address = region->address();
-                details.baseAddress = region->base_address();
-                details.allocationBase = region->allocation_base();
-                details.allocationProtect = region->allocation_protect();
-                details.regionSize = region->region_size();
-                details.state = region->state();
-                details.protect = region->protect();
-                details.type = region->type();
-                details.moduleBase = region->module_base();
-                details.moduleSize = region->module_size();
-                details.moduleName = stringFromBuffer(region->module_name());
-                details.modulePath = stringFromBuffer(region->module_path());
-                details.mappedPath = stringFromBuffer(region->mapped_path());
-                details.isHeap = region->is_heap();
-                details.heapHandle = region->heap_handle();
-                details.heapBlock = region->heap_block();
-                details.heapBlockSize = region->heap_block_size();
-                details.heapFlags = region->heap_flags();
-                details.workingSetQueried = region->working_set_queried();
-                details.workingSetValid = region->working_set_valid();
-                details.workingSetProtect = region->working_set_protect();
-                details.numaNode = region->numa_node();
-                details.shareCount = region->share_count();
-                details.shared = region->shared();
-                details.locked = region->locked();
-                details.largePage = region->large_page();
-                details.bad = region->bad();
-            }
+            auto details = MemoryRegionDetails::fromFlatbuffer(ack->region());
 
             done(std::move(data), std::move(details));
         },

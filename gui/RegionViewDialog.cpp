@@ -1,6 +1,7 @@
 #include "RegionViewDialog.h"
 #include "OccurrenceColors.h"
 #include "common/utility.h"
+#include "interface_generated.h"
 #include "ui_RegionViewDialog.h"
 #include <QAbstractTableModel>
 #include <QFileDialog>
@@ -12,6 +13,47 @@
 #include <QStyledItemDelegate>
 #include <QTreeWidget>
 #include <algorithm>
+
+MemoryRegionDetails MemoryRegionDetails::fromFlatbuffer(const Interface::MemoryRegionInfo *region)
+{
+    MemoryRegionDetails details;
+    if (!region)
+        return details;
+
+    const auto stringFromBuffer = [](const flatbuffers::String *value) {
+        return value ? QString::fromUtf8(value->c_str(), static_cast<qsizetype>(value->size())) : QString{};
+    };
+
+    details.available = true;
+    details.address = region->address();
+    details.baseAddress = region->base_address();
+    details.allocationBase = region->allocation_base();
+    details.allocationProtect = region->allocation_protect();
+    details.regionSize = region->region_size();
+    details.state = region->state();
+    details.protect = region->protect();
+    details.type = region->type();
+    details.moduleBase = region->module_base();
+    details.moduleSize = region->module_size();
+    details.moduleName = stringFromBuffer(region->module_name());
+    details.modulePath = stringFromBuffer(region->module_path());
+    details.mappedPath = stringFromBuffer(region->mapped_path());
+    details.isHeap = region->is_heap();
+    details.heapHandle = region->heap_handle();
+    details.heapBlock = region->heap_block();
+    details.heapBlockSize = region->heap_block_size();
+    details.heapFlags = region->heap_flags();
+    details.workingSetQueried = region->working_set_queried();
+    details.workingSetValid = region->working_set_valid();
+    details.workingSetProtect = region->working_set_protect();
+    details.numaNode = region->numa_node();
+    details.shareCount = region->share_count();
+    details.shared = region->shared();
+    details.locked = region->locked();
+    details.largePage = region->large_page();
+    details.bad = region->bad();
+    return details;
+}
 
 namespace
 {

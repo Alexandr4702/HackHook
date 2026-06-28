@@ -20,6 +20,7 @@
 
 class QPoint;
 class QCloseEvent;
+class QTimer;
 
 QT_BEGIN_NAMESPACE
 namespace Ui
@@ -57,6 +58,14 @@ class MainWindow : public QMainWindow
     void refreshCachedRegions(std::function<void()> done);
     void filterOccurrences(std::span<const uint8_t> value, Interface::ValueType type);
     void showResultsContextMenu(const QPoint &position);
+    void showValueWatchContextMenu(const QPoint &position);
+    void showRegionWatchContextMenu(const QPoint &position);
+    void addValueWatch(const FoundOccurrences &occurrence);
+    void addRegionWatch(const FoundOccurrences &occurrence);
+    void refreshWatches();
+    void finishWatchRequest();
+    void updateValueWatchRow(size_t index, const QString &value, const QString &status);
+    void updateRegionWatchRow(size_t index, const MemoryRegionDetails *details, const QString &status);
     void viewRegion(const FoundOccurrences &occurrence, std::vector<FoundOccurrences> regionOccurrences);
     using RegionDataCallback = std::function<void(std::vector<uint8_t>, MemoryRegionDetails)>;
     bool requestRegionData(const FoundOccurrences &occurrence, RegionDataCallback done,
@@ -127,6 +136,17 @@ class MainWindow : public QMainWindow
 
     RpcClient m_rpc_client;
     MemoryCache m_occur_storage;
+    struct RegionWatch
+    {
+        FoundOccurrences occurrence{};
+        MemoryRegionDetails details{};
+    };
+    std::vector<FoundOccurrences> m_valueWatches;
+    std::vector<RegionWatch> m_regionWatches;
+    QTimer *m_watchTimer = nullptr;
+    size_t m_pendingWatchRequests = 0;
+    bool m_watchRefreshInProgress = false;
+    bool m_watchRefreshQueued = false;
     bool m_hooked = false;
     bool m_hookReady = false;
     bool m_unhookPending = false;

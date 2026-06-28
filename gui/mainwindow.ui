@@ -120,13 +120,7 @@
      </layout>
     </item>
     <item>
-     <widget class="QGroupBox" name="watchlistGroup">
-      <property name="title">
-       <string>Watchlist</string>
-      </property>
-      <layout class="QVBoxLayout">
-       <item>
-        <widget class="QTableWidget" name="resultsTable">
+     <widget class="QTableWidget" name="resultsTable">
          <property name="columnCount">
           <number>8</number>
          </property>
@@ -170,23 +164,114 @@
            <string>Property</string>
           </property>
          </column>
-        </widget>
+     </widget>
+    </item>
+    <item>
+     <widget class="QGroupBox" name="watchlistGroup">
+      <property name="title">
+       <string>Watch</string>
+      </property>
+      <layout class="QVBoxLayout" name="watchLayout">
+       <item>
+        <layout class="QHBoxLayout" name="watchControlsLayout">
+         <item>
+          <widget class="QPushButton" name="watchRefreshButton">
+           <property name="text">
+            <string>Refresh</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QCheckBox" name="watchAutoRefreshCheck">
+           <property name="text">
+            <string>Auto refresh</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="watchIntervalLabel">
+           <property name="text">
+            <string>Interval:</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QSpinBox" name="watchIntervalSpin">
+           <property name="suffix">
+            <string> ms</string>
+           </property>
+           <property name="minimum">
+            <number>250</number>
+           </property>
+           <property name="maximum">
+            <number>60000</number>
+           </property>
+           <property name="singleStep">
+            <number>250</number>
+           </property>
+           <property name="value">
+            <number>1000</number>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="watchControlsSpacer">
+           <property name="orientation">
+            <enum>Qt::Orientation::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
        </item>
        <item>
-        <widget class="QTableWidget" name="watchlistTable">
-         <property name="columnCount">
-          <number>2</number>
+        <widget class="QSplitter" name="watchSplitter">
+         <property name="orientation">
+          <enum>Qt::Orientation::Horizontal</enum>
          </property>
-         <column>
-          <property name="text">
-           <string>Address</string>
+         <widget class="QGroupBox" name="valueWatchGroup">
+          <property name="title">
+           <string>Values</string>
           </property>
-         </column>
-         <column>
-          <property name="text">
-           <string>Value</string>
+          <layout class="QVBoxLayout" name="valueWatchLayout">
+           <item>
+            <widget class="QTableWidget" name="valueWatchTable">
+             <property name="columnCount">
+              <number>4</number>
+             </property>
+             <column><property name="text"><string>Address</string></property></column>
+             <column><property name="text"><string>Value</string></property></column>
+             <column><property name="text"><string>Type</string></property></column>
+             <column><property name="text"><string>Status</string></property></column>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+         <widget class="QGroupBox" name="regionWatchGroup">
+          <property name="title">
+           <string>Regions</string>
           </property>
-         </column>
+          <layout class="QVBoxLayout" name="regionWatchLayout">
+           <item>
+            <widget class="QTableWidget" name="regionWatchTable">
+             <property name="columnCount">
+              <number>6</number>
+             </property>
+             <column><property name="text"><string>Base address</string></property></column>
+             <column><property name="text"><string>Size</string></property></column>
+             <column><property name="text"><string>Protection</string></property></column>
+             <column><property name="text"><string>Type</string></property></column>
+             <column><property name="text"><string>Module</string></property></column>
+             <column><property name="text"><string>Status</string></property></column>
+            </widget>
+           </item>
+          </layout>
+         </widget>
         </widget>
        </item>
       </layout>

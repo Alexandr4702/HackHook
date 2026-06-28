@@ -11,10 +11,17 @@ namespace Ui
 class RegionViewDialog;
 }
 
+namespace Interface
+{
+struct MemoryRegionInfo;
+}
+
 class QAbstractItemModel;
 
 struct MemoryRegionDetails
 {
+    static MemoryRegionDetails fromFlatbuffer(const Interface::MemoryRegionInfo *region);
+
     bool available = false;
     uint64_t address = 0;
     uint64_t baseAddress = 0;
