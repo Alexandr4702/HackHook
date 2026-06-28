@@ -350,8 +350,12 @@ DWORD WINAPI MyHook::ThreadWrapperMsg(LPVOID param) noexcept
     self->m_state.store(State::Stopping, std::memory_order_release);
     self->shutdown();
 
-    if (module)
+    if (module && self->m_finalizeReceived.load(std::memory_order_acquire))
         FreeLibraryAndExitThread(module, result);
+
+    // On an IPC/protocol failure there is no proof that the Windows hook was
+    // removed.  Intentionally retain the owned module reference instead of
+    // risking an unload underneath HookProc.
 
     return result;
 }
@@ -563,11 +567,24 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
     }
     case Interface::CommandID_STOP: {
         m_state.store(State::Stopping, std::memory_order_release);
-        m_running.store(false, std::memory_order_release);
         const bool acknowledged = m_sender.send_command(
             msg->request_id(), Interface::CommandID::CommandID_ACK,
             Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
         m_stopAcknowledged.store(acknowledged, std::memory_order_release);
+        // Keep consuming until the injector has removed the Windows hook and
+        // sends the explicit unload-safe FINALIZE command.
+        break;
+    }
+    case Interface::CommandID_FINALIZE: {
+        m_state.store(State::Stopping, std::memory_order_release);
+        const bool acknowledged = m_sender.send_command(
+            msg->request_id(), Interface::CommandID::CommandID_ACK,
+            Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+        m_stopAcknowledged.store(acknowledged, std::memory_order_release);
+        // FINALIZE is only sent after UnhookWindowsHookEx and the target-thread
+        // barrier have both completed.
+        m_finalizeReceived.store(true, std::memory_order_release);
+        m_running.store(false, std::memory_order_release);
         break;
     }
     default:
@@ -629,7 +646,13 @@ DWORD WINAPI MyHook::MsgConsumerThread()
             LOG(m_log, "Invalid FlatBuffer message");
             continue;
         }
-        HandleMessage(GetCommandEnvelope(buff.data()));
+        const auto *message = GetCommandEnvelope(buff.data());
+        // STOP is a quiesce request.  Drain queued work, accepting only the
+        // post-unhook FINALIZE command.
+        if (m_state.load(std::memory_order_acquire) == State::Stopping &&
+            message->id() != Interface::CommandID_FINALIZE)
+            continue;
+        HandleMessage(message);
     }
 
     return 0;

@@ -46,6 +46,7 @@ class MyHook
     std::atomic<State> m_state = State::Stopped;
     std::atomic<bool> m_shutdown = false;
     std::atomic<bool> m_stopAcknowledged = false;
+    std::atomic<bool> m_finalizeReceived = false;
     HWND m_targetHwnd = nullptr;
     MessageIPCSender m_sender;
     SharedBuffer m_reciver;

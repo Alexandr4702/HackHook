@@ -233,24 +233,47 @@ MainWindow::~MainWindow()
     {
         m_recive_thread.join();
     }
-    m_sender.close();
 
-    if (m_injector.isHooked())
+    m_rpc_client.clear_callbacks();
+    const bool hookRemoved = !m_injector.isHooked() || m_injector.unhook();
+    if (hookRemoved)
     {
-        m_injector.unhook();
+        // This is only a fallback for non-standard destruction; normal window
+        // closing waits for FINALIZE_ACK in completeUnhook().
+        m_sender.send_command(0, Interface::CommandID_FINALIZE, Interface::Command::Command_NONE,
+                              Interface::CreateEmptyCommand);
+        m_sender.close();
+    }
+    else
+    {
+        // Do not signal the target worker when UnhookWindowsHookEx failed.
+        // Unmap locally while leaving its owned DLL reference pinned.
+        m_sender.release(false);
     }
     delete ui;
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-    if (m_closeApproved || !m_injector.isHooked())
+    if (m_closeApproved)
     {
         event->accept();
         return;
     }
 
     event->ignore();
+    if (m_unhookPending || m_unhookFinalizing)
+    {
+        m_closePending = true;
+        return;
+    }
+
+    if (!m_injector.isHooked())
+    {
+        event->accept();
+        return;
+    }
+
     if (m_closePending)
         return;
 
@@ -293,14 +316,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
 void MainWindow::finishClose()
 {
-    if (!finishUnhook())
-    {
-        m_closePending = false;
-        return;
-    }
-
-    m_closeApproved = true;
-    QMetaObject::invokeMethod(this, [this]() { close(); }, Qt::QueuedConnection);
+    finishUnhook();
 }
 
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam)
@@ -489,6 +505,7 @@ void MainWindow::on_hookButton_clicked()
         }
 
         // Reopen and clear IPC before the hook can start its worker in the target process.
+        m_rpc_client.clear_callbacks();
         m_sender.reset();
         m_reciver.reset();
         if (m_injector.hook(windowName))
@@ -501,6 +518,8 @@ void MainWindow::on_hookButton_clicked()
             m_hooked = true;
             m_hookReady = false;
             m_unhookPending = false;
+            m_unhookFinalizing = false;
+            m_finalizeAcknowledged = false;
             m_hookStopAcknowledged = false;
             m_hook_cv.notify_all();
             ui->dumpButton->setEnabled(false);
@@ -561,8 +580,13 @@ void MainWindow::on_hookButton_clicked()
     }
 }
 
-bool MainWindow::finishUnhook()
+void MainWindow::finishUnhook()
 {
+    if (m_unhookFinalizing)
+        return;
+
+    m_unhookPending = true;
+    ui->hookButton->setEnabled(false);
     {
         std::scoped_lock lock(m_hook_mutex);
         m_hooked = false;
@@ -570,24 +594,97 @@ bool MainWindow::finishUnhook()
         m_hook_cv.notify_all();
     }
 
-    m_sender.close();
-    m_reciver.close();
     if (!m_injector.unhook())
     {
         m_unhookPending = false;
         ui->hookButton->setText("Retry Unhook");
         ui->hookButton->setEnabled(true);
         qWarning() << "Failed to remove hook";
-        return false;
+        m_closePending = false;
+        return;
     }
 
+    // Old requests will never receive replies after STOP.  Remove their
+    // callbacks before registering the FINALIZE callback.
+    m_rpc_client.clear_callbacks();
+    m_pendingWatchRequests = 0;
+    m_watchRefreshInProgress = false;
+    m_watchRefreshQueued = false;
+    ui->watchRefreshButton->setEnabled(true);
+
+    m_unhookFinalizing = true;
+    m_finalizeAcknowledged = false;
+    const uint64_t attempt = ++m_unhookAttempt;
+    const bool sent = m_rpc_client.send_rpc_cb(
+        [this, attempt](const Interface::CommandEnvelope *msg) {
+            if (!m_unhookFinalizing || attempt != m_unhookAttempt)
+                return;
+            if (!msg || msg->id() != Interface::CommandID_ACK)
+            {
+                qWarning() << "Hook did not acknowledge FINALIZE; retaining its safety pin if necessary";
+                completeUnhook();
+                return;
+            }
+            m_finalizeAcknowledged = true;
+            waitForTargetUnload(attempt, 100);
+        },
+        Interface::CommandID_FINALIZE, Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+
+    if (!sent)
+    {
+        qWarning() << "Failed to send FINALIZE; target DLL will remain pinned for safety";
+        completeUnhook();
+        return;
+    }
+
+    QTimer::singleShot(5000, this, [this, attempt]() {
+        if (!m_unhookFinalizing || m_finalizeAcknowledged || attempt != m_unhookAttempt)
+            return;
+        qWarning() << "Timed out waiting for FINALIZE acknowledgement; target DLL may remain pinned";
+        completeUnhook();
+    });
+}
+
+void MainWindow::waitForTargetUnload(uint64_t attempt, int retriesRemaining)
+{
+    if (!m_unhookFinalizing || attempt != m_unhookAttempt)
+        return;
+    if (!m_injector.isTargetModuleLoaded())
+    {
+        completeUnhook();
+        return;
+    }
+    if (retriesRemaining <= 0)
+    {
+        qWarning() << "Target DLL remained loaded after FINALIZE acknowledgement";
+        completeUnhook();
+        return;
+    }
+    QTimer::singleShot(20, this, [this, attempt, retriesRemaining]() {
+        waitForTargetUnload(attempt, retriesRemaining - 1);
+    });
+}
+
+void MainWindow::completeUnhook()
+{
+    m_rpc_client.clear_callbacks();
+    m_sender.close();
+    m_reciver.close();
+
     m_unhookPending = false;
+    m_unhookFinalizing = false;
+    m_finalizeAcknowledged = false;
     m_hookStopAcknowledged = false;
     ui->dumpButton->setEnabled(false);
     ui->hookButton->setText("Inject Hook");
     ui->hookButton->setEnabled(true);
     qDebug() << "unhooked";
-    return true;
+
+    if (m_closePending)
+    {
+        m_closeApproved = true;
+        QMetaObject::invokeMethod(this, [this]() { close(); }, Qt::QueuedConnection);
+    }
 }
 
 void MainWindow::on_dumpButton_clicked()

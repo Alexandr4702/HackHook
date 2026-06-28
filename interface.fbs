@@ -17,6 +17,7 @@ enum CommandID : byte {
   READY,
   REGION_READ,
   REGION_READ_ACK,
+  FINALIZE,
 }
 
 enum ValueType : byte {

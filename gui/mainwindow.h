@@ -70,7 +70,9 @@ class MainWindow : public QMainWindow
     using RegionDataCallback = std::function<void(std::vector<uint8_t>, MemoryRegionDetails)>;
     bool requestRegionData(const FoundOccurrences &occurrence, RegionDataCallback done,
                            std::function<void()> failed = {});
-    bool finishUnhook();
+    void finishUnhook();
+    void completeUnhook();
+    void waitForTargetUnload(uint64_t attempt, int retriesRemaining);
     void finishClose();
 
     class RpcClient
@@ -120,6 +122,12 @@ class MainWindow : public QMainWindow
             if (cb)
                 cb(msg);
         }
+
+        void clear_callbacks()
+        {
+            std::scoped_lock lck(m_mtx);
+            m_callbacks.clear();
+        }
         private:
         MessageIPCSender &m_sender;
         std::atomic_uint64_t m_cnt = 0;
@@ -153,6 +161,9 @@ class MainWindow : public QMainWindow
     bool m_hookStopAcknowledged = false;
     bool m_closePending = false;
     bool m_closeApproved = false;
+    bool m_unhookFinalizing = false;
+    bool m_finalizeAcknowledged = false;
+    uint64_t m_unhookAttempt = 0;
     std::mutex m_hook_mutex;
     std::condition_variable m_hook_cv;
 };
