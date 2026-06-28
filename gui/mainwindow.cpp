@@ -1005,11 +1005,16 @@ void MainWindow::updateValueWatchRow(size_t index, const QString &value, const Q
 
     const auto &occurrence = m_valueWatches[index];
     const int row = static_cast<int>(index);
-    table->setItem(row, 0,
+    table->setItem(row, 0, new QTableWidgetItem(value));
+    table->setItem(row, 1,
                    new QTableWidgetItem(QString("0x%1").arg(occurrence.baseAddress + occurrence.offset, 0, 16)));
-    table->setItem(row, 1, new QTableWidgetItem(value));
-    table->setItem(row, 2, new QTableWidgetItem(valueTypeName(occurrence.type)));
-    table->setItem(row, 3, new QTableWidgetItem(status));
+    table->setItem(row, 2, new QTableWidgetItem(QString("0x%1").arg(occurrence.baseAddress, 0, 16)));
+    table->setItem(row, 3, new QTableWidgetItem(QString::number(occurrence.offset)));
+    table->setItem(row, 4, new QTableWidgetItem(QString::number(occurrence.region_size)));
+    table->setItem(row, 5, new QTableWidgetItem(QString::number(occurrence.data_size)));
+    table->setItem(row, 6, new QTableWidgetItem(valueTypeName(occurrence.type)));
+    table->setItem(row, 7, new QTableWidgetItem{});
+    table->setItem(row, 8, new QTableWidgetItem(status));
 }
 
 void MainWindow::updateRegionWatchRow(size_t index, const MemoryRegionDetails *details, const QString &status)
@@ -1053,8 +1058,8 @@ void MainWindow::refreshWatches()
     if (!m_hookReady || m_unhookPending || !m_injector.isHooked())
     {
         for (size_t i = 0; i < m_valueWatches.size(); ++i)
-            updateValueWatchRow(i, ui->valueWatchTable->item(static_cast<int>(i), 1)
-                                       ? ui->valueWatchTable->item(static_cast<int>(i), 1)->text()
+            updateValueWatchRow(i, ui->valueWatchTable->item(static_cast<int>(i), 0)
+                                       ? ui->valueWatchTable->item(static_cast<int>(i), 0)->text()
                                        : QStringLiteral("-"),
                                 tr("Disconnected"));
         for (size_t i = 0; i < m_regionWatches.size(); ++i)
@@ -1095,8 +1100,8 @@ void MainWindow::refreshWatches()
                     }
                     else
                     {
-                        const QString oldValue = ui->valueWatchTable->item(static_cast<int>(index), 1)
-                                                     ? ui->valueWatchTable->item(static_cast<int>(index), 1)->text()
+                        const QString oldValue = ui->valueWatchTable->item(static_cast<int>(index), 0)
+                                                     ? ui->valueWatchTable->item(static_cast<int>(index), 0)->text()
                                                      : QStringLiteral("-");
                         updateValueWatchRow(index, oldValue, tr("Read failed"));
                     }
@@ -1113,8 +1118,8 @@ void MainWindow::refreshWatches()
             if (current != m_valueWatches.end())
             {
                 const size_t index = static_cast<size_t>(std::distance(m_valueWatches.begin(), current));
-                const QString oldValue = ui->valueWatchTable->item(static_cast<int>(index), 1)
-                                             ? ui->valueWatchTable->item(static_cast<int>(index), 1)->text()
+                const QString oldValue = ui->valueWatchTable->item(static_cast<int>(index), 0)
+                                             ? ui->valueWatchTable->item(static_cast<int>(index), 0)->text()
                                              : QStringLiteral("-");
                 updateValueWatchRow(index, oldValue, validSize ? tr("Send failed") : tr("Invalid size"));
             }
