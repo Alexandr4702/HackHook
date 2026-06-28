@@ -2,6 +2,7 @@
 
 #include "WindowSelectorCombo.h"
 #include "RegionViewDialog.h"
+#include "RpcClient.h"
 #include "common/common.h"
 #include "common/utility.h"
 #include "myhook/MemoryScanner.h"
@@ -10,8 +11,6 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
-#include <unordered_map>
-#include <utility>
 #include <QMainWindow>
 #include <condition_variable>
 #include <thread>
@@ -74,66 +73,6 @@ class MainWindow : public QMainWindow
     void completeUnhook();
     void waitForTargetUnload(uint64_t attempt, int retriesRemaining);
     void finishClose();
-
-    class RpcClient
-    {
-        public:
-        using Callback = std::function<void(const Interface::CommandEnvelope *)>;
-
-        RpcClient(MessageIPCSender& sender): m_sender(sender)
-        {
-
-        }
-
-        template <typename TCreateFn, typename... Args>
-        bool send_rpc(Interface::CommandID id, Interface::Command type, TCreateFn create_fn,
-                      Args &&...args)
-        {
-            return m_sender.send_command(m_cnt.fetch_add(1, std::memory_order_relaxed), id, type, create_fn, std::forward<Args>(args)...);
-        }
-        template <typename TCreateFn, typename... Args>
-        bool send_rpc_cb(Callback cb, Interface::CommandID id, Interface::Command type,
-                          TCreateFn create_fn, Args &&...args)
-        {
-            auto cnt = m_cnt.fetch_add(1, std::memory_order_relaxed);
-            {
-                std::scoped_lock lck(m_mtx);
-                m_callbacks[cnt] = std::move(cb);
-            }
-            if (!m_sender.send_command(cnt, id, type, create_fn, std::forward<Args>(args)...))
-            {
-                std::scoped_lock lck(m_mtx);
-                m_callbacks.erase(cnt);
-                return false;
-            }
-            return true;
-        }
-        void call_cb(uint64_t request_id, const Interface::CommandEnvelope *msg)
-        {
-            decltype(m_callbacks)::mapped_type cb;
-            {
-                std::scoped_lock lck(m_mtx);
-                auto it = m_callbacks.find(request_id);
-                if(it == m_callbacks.end())
-                    return;
-                cb = std::move(it->second);
-                m_callbacks.erase(it);
-            }
-            if (cb)
-                cb(msg);
-        }
-
-        void clear_callbacks()
-        {
-            std::scoped_lock lck(m_mtx);
-            m_callbacks.clear();
-        }
-        private:
-        MessageIPCSender &m_sender;
-        std::atomic_uint64_t m_cnt = 0;
-        std::mutex m_mtx;
-        std::unordered_map<uint64_t, Callback> m_callbacks;
-    };
 
     Ui::MainWindow *ui;
     Injector m_injector;

@@ -18,6 +18,7 @@ add_executable(gui_app
     RegionViewDialog.cpp
     RegionViewDialog.h
     RegionViewDialog.ui
+    RpcClient.h
     WindowSelectorCombo.h
     mainwindow.ui
 )
