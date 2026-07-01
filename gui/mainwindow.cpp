@@ -151,15 +151,33 @@ QString memoryProtectionName(uint32_t protection)
     QString value;
     switch (protection & 0xff)
     {
-    case PAGE_NOACCESS: value = QStringLiteral("No access"); break;
-    case PAGE_READONLY: value = QStringLiteral("Read"); break;
-    case PAGE_READWRITE: value = QStringLiteral("Read/Write"); break;
-    case PAGE_WRITECOPY: value = QStringLiteral("Copy-on-write"); break;
-    case PAGE_EXECUTE: value = QStringLiteral("Execute"); break;
-    case PAGE_EXECUTE_READ: value = QStringLiteral("Execute/Read"); break;
-    case PAGE_EXECUTE_READWRITE: value = QStringLiteral("Execute/Read/Write"); break;
-    case PAGE_EXECUTE_WRITECOPY: value = QStringLiteral("Execute/Copy-on-write"); break;
-    default: value = QString("0x%1").arg(protection, 0, 16); break;
+    case PAGE_NOACCESS:
+        value = QStringLiteral("No access");
+        break;
+    case PAGE_READONLY:
+        value = QStringLiteral("Read");
+        break;
+    case PAGE_READWRITE:
+        value = QStringLiteral("Read/Write");
+        break;
+    case PAGE_WRITECOPY:
+        value = QStringLiteral("Copy-on-write");
+        break;
+    case PAGE_EXECUTE:
+        value = QStringLiteral("Execute");
+        break;
+    case PAGE_EXECUTE_READ:
+        value = QStringLiteral("Execute/Read");
+        break;
+    case PAGE_EXECUTE_READWRITE:
+        value = QStringLiteral("Execute/Read/Write");
+        break;
+    case PAGE_EXECUTE_WRITECOPY:
+        value = QStringLiteral("Execute/Copy-on-write");
+        break;
+    default:
+        value = QString("0x%1").arg(protection, 0, 16);
+        break;
     }
     if (protection & PAGE_GUARD)
         value += QStringLiteral(" | Guard");
@@ -334,8 +352,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
             m_hookStopAcknowledged = true;
             finishClose();
         },
-        Interface::CommandID_STOP, Interface::Command::Command_NONE,
-        Interface::CreateEmptyCommand);
+        Interface::CommandID_STOP, Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
 
     if (!sent)
     {
@@ -692,9 +709,8 @@ void MainWindow::waitForTargetUnload(uint64_t attempt, int retriesRemaining)
         completeUnhook();
         return;
     }
-    QTimer::singleShot(20, this, [this, attempt, retriesRemaining]() {
-        waitForTargetUnload(attempt, retriesRemaining - 1);
-    });
+    QTimer::singleShot(20, this,
+                       [this, attempt, retriesRemaining]() { waitForTargetUnload(attempt, retriesRemaining - 1); });
 }
 
 void MainWindow::completeUnhook()
@@ -911,12 +927,10 @@ void MainWindow::showResultsContextMenu(const QPoint &position)
 
     QMenu menu(this);
     QAction *viewRegionAction = menu.addAction(tr("View region"));
-    QAction *addValueWatchAction = menu.addAction(selectedOccurrences.size() > 1
-                                                       ? tr("Add selected values to watch")
-                                                       : tr("Add value to watch"));
-    QAction *addRegionWatchAction = menu.addAction(selectedOccurrences.size() > 1
-                                                        ? tr("Add selected regions to watch")
-                                                        : tr("Add region to watch"));
+    QAction *addValueWatchAction =
+        menu.addAction(selectedOccurrences.size() > 1 ? tr("Add selected values to watch") : tr("Add value to watch"));
+    QAction *addRegionWatchAction = menu.addAction(selectedOccurrences.size() > 1 ? tr("Add selected regions to watch")
+                                                                                  : tr("Add region to watch"));
     menu.addSeparator();
     QAction *saveAction = menu.addAction(tr("Save table as CSV..."));
     viewRegionAction->setEnabled(clickedRow >= 0 && m_hookReady && !m_unhookPending && m_injector.isHooked());
@@ -1027,13 +1041,12 @@ void MainWindow::showValueWatchContextMenu(const QPoint &position)
 
     QMenu menu(this);
     QAction *viewAction = menu.addAction(tr("View region"));
-    QAction *addRegionWatchAction = menu.addAction(rows.size() > 1
-                                                        ? tr("Add selected regions to watch")
-                                                        : tr("Add region to watch"));
-    QAction *removeAction = menu.addAction(rows.size() > 1 ? tr("Remove selected from watch")
-                                                           : tr("Remove from watch"));
-    viewAction->setEnabled(clickedRow >= 0 && static_cast<size_t>(clickedRow) < m_valueWatches.size() &&
-                           m_hookReady && !m_unhookPending && m_injector.isHooked());
+    QAction *addRegionWatchAction =
+        menu.addAction(rows.size() > 1 ? tr("Add selected regions to watch") : tr("Add region to watch"));
+    QAction *removeAction =
+        menu.addAction(rows.size() > 1 ? tr("Remove selected from watch") : tr("Remove from watch"));
+    viewAction->setEnabled(clickedRow >= 0 && static_cast<size_t>(clickedRow) < m_valueWatches.size() && m_hookReady &&
+                           !m_unhookPending && m_injector.isHooked());
     addRegionWatchAction->setEnabled(!rows.empty());
     removeAction->setEnabled(!rows.empty());
     menu.addSeparator();
@@ -1102,12 +1115,12 @@ void MainWindow::showRegionWatchContextMenu(const QPoint &position)
 
     QMenu menu(this);
     QAction *viewAction = menu.addAction(tr("View region"));
-    QAction *removeAction = menu.addAction(rows.size() > 1 ? tr("Remove selected from watch")
-                                                           : tr("Remove from watch"));
+    QAction *removeAction =
+        menu.addAction(rows.size() > 1 ? tr("Remove selected from watch") : tr("Remove from watch"));
     menu.addSeparator();
     QAction *saveAction = menu.addAction(tr("Save table as CSV..."));
-    viewAction->setEnabled(clickedRow >= 0 && static_cast<size_t>(clickedRow) < m_regionWatches.size() &&
-                           m_hookReady && !m_unhookPending && m_injector.isHooked());
+    viewAction->setEnabled(clickedRow >= 0 && static_cast<size_t>(clickedRow) < m_regionWatches.size() && m_hookReady &&
+                           !m_unhookPending && m_injector.isHooked());
     removeAction->setEnabled(!rows.empty());
     QAction *selectedAction = menu.exec(ui->regionWatchTable->viewport()->mapToGlobal(position));
     if (selectedAction == viewAction)
@@ -1134,8 +1147,7 @@ void MainWindow::showRegionWatchContextMenu(const QPoint &position)
 
 void MainWindow::saveTable(QTableWidget *table, const QString &title)
 {
-    QString fileName = QFileDialog::getSaveFileName(this, tr("Save %1").arg(title),
-                                                    title + QStringLiteral(".csv"),
+    QString fileName = QFileDialog::getSaveFileName(this, tr("Save %1").arg(title), title + QStringLiteral(".csv"),
                                                     tr("CSV files (*.csv);;All files (*)"));
     if (fileName.isEmpty())
         return;
@@ -1225,15 +1237,16 @@ void MainWindow::updateRegionWatchRow(size_t index, const MemoryRegionDetails *d
     const uint64_t size = watch.details.available ? watch.details.regionSize : watch.occurrence.region_size;
     table->setItem(row, 0, new QTableWidgetItem(QString("0x%1").arg(base, 0, 16)));
     table->setItem(row, 1, new QTableWidgetItem(QString::number(size)));
-    table->setItem(row, 2, new QTableWidgetItem(watch.details.available
-                                                    ? memoryProtectionName(watch.details.protect)
-                                                    : QStringLiteral("-")));
-    table->setItem(row, 3, new QTableWidgetItem(watch.details.available
-                                                    ? memoryTypeName(watch.details.type)
-                                                    : QStringLiteral("-")));
-    table->setItem(row, 4, new QTableWidgetItem(watch.details.available && !watch.details.moduleName.isEmpty()
-                                                    ? watch.details.moduleName
-                                                    : QStringLiteral("-")));
+    table->setItem(row, 2,
+                   new QTableWidgetItem(watch.details.available ? memoryProtectionName(watch.details.protect)
+                                                                : QStringLiteral("-")));
+    table->setItem(
+        row, 3,
+        new QTableWidgetItem(watch.details.available ? memoryTypeName(watch.details.type) : QStringLiteral("-")));
+    table->setItem(row, 4,
+                   new QTableWidgetItem(watch.details.available && !watch.details.moduleName.isEmpty()
+                                            ? watch.details.moduleName
+                                            : QStringLiteral("-")));
     table->setItem(row, 5, new QTableWidgetItem(status));
 }
 
@@ -1248,9 +1261,10 @@ void MainWindow::refreshWatches()
     if (!m_hookReady || m_unhookPending || !m_injector.isHooked())
     {
         for (size_t i = 0; i < m_valueWatches.size(); ++i)
-            updateValueWatchRow(i, ui->valueWatchTable->item(static_cast<int>(i), 0)
-                                       ? ui->valueWatchTable->item(static_cast<int>(i), 0)->text()
-                                       : QStringLiteral("-"),
+            updateValueWatchRow(i,
+                                ui->valueWatchTable->item(static_cast<int>(i), 0)
+                                    ? ui->valueWatchTable->item(static_cast<int>(i), 0)->text()
+                                    : QStringLiteral("-"),
                                 tr("Disconnected"));
         for (size_t i = 0; i < m_regionWatches.size(); ++i)
             updateRegionWatchRow(i, nullptr, tr("Disconnected"));
@@ -1270,36 +1284,39 @@ void MainWindow::refreshWatches()
     {
         const uint64_t address = occurrence.baseAddress + occurrence.offset;
         const bool validSize = occurrence.data_size != 0 && occurrence.data_size <= MAX_READ_SIZE;
-        const bool sent = validSize && m_rpc_client.send_rpc_cb(
-            [this, occurrence, address](const Interface::CommandEnvelope *msg) {
-                const auto current = std::ranges::find_if(m_valueWatches, [address](const FoundOccurrences &entry) {
-                    return entry.baseAddress + entry.offset == address;
-                });
-                if (current != m_valueWatches.end())
-                {
-                    const size_t index = static_cast<size_t>(std::distance(m_valueWatches.begin(), current));
-                    const auto *ack = msg && msg->id() == Interface::CommandID_READ_ACK ? msg->body_as_ReadAck() : nullptr;
-                    const auto *data = ack ? ack->data() : nullptr;
-                    if (data && data->size() == occurrence.data_size)
+        const bool sent =
+            validSize &&
+            m_rpc_client.send_rpc_cb(
+                [this, occurrence, address](const Interface::CommandEnvelope *msg) {
+                    const auto current = std::ranges::find_if(m_valueWatches, [address](const FoundOccurrences &entry) {
+                        return entry.baseAddress + entry.offset == address;
+                    });
+                    if (current != m_valueWatches.end())
                     {
-                        const std::span<const uint8_t> bytes(data->data(), data->size());
-                        updateValueWatchRow(index,
-                                            QString::fromStdString(valueToString(
-                                                bytes, static_cast<Interface::ValueType>(occurrence.type))),
-                                            updatedStatus());
+                        const size_t index = static_cast<size_t>(std::distance(m_valueWatches.begin(), current));
+                        const auto *ack =
+                            msg && msg->id() == Interface::CommandID_READ_ACK ? msg->body_as_ReadAck() : nullptr;
+                        const auto *data = ack ? ack->data() : nullptr;
+                        if (data && data->size() == occurrence.data_size)
+                        {
+                            const std::span<const uint8_t> bytes(data->data(), data->size());
+                            updateValueWatchRow(index,
+                                                QString::fromStdString(valueToString(
+                                                    bytes, static_cast<Interface::ValueType>(occurrence.type))),
+                                                updatedStatus());
+                        }
+                        else
+                        {
+                            const QString oldValue = ui->valueWatchTable->item(static_cast<int>(index), 0)
+                                                         ? ui->valueWatchTable->item(static_cast<int>(index), 0)->text()
+                                                         : QStringLiteral("-");
+                            updateValueWatchRow(index, oldValue, tr("Read failed"));
+                        }
                     }
-                    else
-                    {
-                        const QString oldValue = ui->valueWatchTable->item(static_cast<int>(index), 0)
-                                                     ? ui->valueWatchTable->item(static_cast<int>(index), 0)->text()
-                                                     : QStringLiteral("-");
-                        updateValueWatchRow(index, oldValue, tr("Read failed"));
-                    }
-                }
-                finishWatchRequest();
-            },
-            Interface::CommandID_READ, Interface::Command::Command_ReadCommand, Interface::CreateReadCommand,
-            address, occurrence.data_size);
+                    finishWatchRequest();
+                },
+                Interface::CommandID_READ, Interface::Command::Command_ReadCommand, Interface::CreateReadCommand,
+                address, occurrence.data_size);
         if (!sent)
         {
             const auto current = std::ranges::find_if(m_valueWatches, [address](const FoundOccurrences &entry) {
@@ -1323,9 +1340,8 @@ void MainWindow::refreshWatches()
         const uint64_t base = watch.occurrence.baseAddress;
         const bool sent = m_rpc_client.send_rpc_cb(
             [this, base](const Interface::CommandEnvelope *msg) {
-                const auto current = std::ranges::find_if(m_regionWatches, [base](const RegionWatch &entry) {
-                    return entry.occurrence.baseAddress == base;
-                });
+                const auto current = std::ranges::find_if(
+                    m_regionWatches, [base](const RegionWatch &entry) { return entry.occurrence.baseAddress == base; });
                 if (current != m_regionWatches.end())
                 {
                     const size_t index = static_cast<size_t>(std::distance(m_regionWatches.begin(), current));
@@ -1349,9 +1365,8 @@ void MainWindow::refreshWatches()
             Interface::CreateRegionReadCommand, base, uint64_t{0}, base);
         if (!sent)
         {
-            const auto current = std::ranges::find_if(m_regionWatches, [base](const RegionWatch &entry) {
-                return entry.occurrence.baseAddress == base;
-            });
+            const auto current = std::ranges::find_if(
+                m_regionWatches, [base](const RegionWatch &entry) { return entry.occurrence.baseAddress == base; });
             if (current != m_regionWatches.end())
                 updateRegionWatchRow(static_cast<size_t>(std::distance(m_regionWatches.begin(), current)), nullptr,
                                      tr("Send failed"));
@@ -1373,37 +1388,34 @@ void MainWindow::finishWatchRequest()
     }
 }
 
-void MainWindow::viewRegion(const FoundOccurrences &occurrence,
-                            std::vector<FoundOccurrences> regionOccurrences)
+void MainWindow::viewRegion(const FoundOccurrences &occurrence, std::vector<FoundOccurrences> regionOccurrences)
 {
-    requestRegionData(
-        occurrence,
-        [this, occurrence, regionOccurrences = std::move(regionOccurrences)](
-            std::vector<uint8_t> data, MemoryRegionDetails details) mutable {
-            auto *dialog = new RegionViewDialog(occurrence, std::move(regionOccurrences), std::move(data),
-                                                std::move(details), ui->windowSelectorCombo->currentText(), this);
-            QPointer<RegionViewDialog> guardedDialog(dialog);
-            connect(dialog, &RegionViewDialog::updateRequested, this, [this, guardedDialog, occurrence]() {
-                if (!guardedDialog)
-                    return;
+    requestRegionData(occurrence, [this, occurrence, regionOccurrences = std::move(regionOccurrences)](
+                                      std::vector<uint8_t> data, MemoryRegionDetails details) mutable {
+        auto *dialog = new RegionViewDialog(occurrence, std::move(regionOccurrences), std::move(data),
+                                            std::move(details), ui->windowSelectorCombo->currentText(), this);
+        QPointer<RegionViewDialog> guardedDialog(dialog);
+        connect(dialog, &RegionViewDialog::updateRequested, this, [this, guardedDialog, occurrence]() {
+            if (!guardedDialog)
+                return;
 
-                guardedDialog->setUpdating(true);
-                auto finishUpdate = [guardedDialog]() {
-                    if (guardedDialog)
-                        guardedDialog->setUpdating(false);
-                };
-                requestRegionData(
-                    occurrence,
-                    [guardedDialog](std::vector<uint8_t> refreshedData, MemoryRegionDetails refreshedDetails) {
-                        if (!guardedDialog)
-                            return;
-                        guardedDialog->setRegionData(std::move(refreshedData), std::move(refreshedDetails));
-                        guardedDialog->setUpdating(false);
-                    },
-                    std::move(finishUpdate));
-            });
-            dialog->show();
+            guardedDialog->setUpdating(true);
+            auto finishUpdate = [guardedDialog]() {
+                if (guardedDialog)
+                    guardedDialog->setUpdating(false);
+            };
+            requestRegionData(
+                occurrence,
+                [guardedDialog](std::vector<uint8_t> refreshedData, MemoryRegionDetails refreshedDetails) {
+                    if (!guardedDialog)
+                        return;
+                    guardedDialog->setRegionData(std::move(refreshedData), std::move(refreshedDetails));
+                    guardedDialog->setUpdating(false);
+                },
+                std::move(finishUpdate));
         });
+        dialog->show();
+    });
 }
 
 bool MainWindow::requestRegionData(const FoundOccurrences &occurrence, RegionDataCallback done,
@@ -1419,8 +1431,7 @@ bool MainWindow::requestRegionData(const FoundOccurrences &occurrence, RegionDat
     }
 
     const bool sent = m_rpc_client.send_rpc_cb(
-        [this, done = std::move(done), failed](
-            const Interface::CommandEnvelope *msg) mutable {
+        [this, done = std::move(done), failed](const Interface::CommandEnvelope *msg) mutable {
             if (!msg || msg->id() != Interface::CommandID_REGION_READ_ACK)
             {
                 QMessageBox::warning(this, tr("View region"), tr("Failed to read the selected region."));
@@ -1448,8 +1459,8 @@ bool MainWindow::requestRegionData(const FoundOccurrences &occurrence, RegionDat
             done(std::move(data), std::move(details));
         },
         Interface::CommandID_REGION_READ, Interface::Command::Command_RegionReadCommand,
-        Interface::CreateRegionReadCommand,
-        occurrence.baseAddress, occurrence.region_size, occurrence.baseAddress + occurrence.offset);
+        Interface::CreateRegionReadCommand, occurrence.baseAddress, occurrence.region_size,
+        occurrence.baseAddress + occurrence.offset);
 
     if (!sent)
     {

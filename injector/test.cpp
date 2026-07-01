@@ -1,10 +1,10 @@
-#include <windows.h>
-#include <tlhelp32.h>
-#include <iostream>
-#include <string>
-#include <mutex>
 #include "common/common.h"
 #include "common/utility.h"
+#include <iostream>
+#include <mutex>
+#include <string>
+#include <windows.h>
+#include <tlhelp32.h>
 
 using namespace Interface;
 
@@ -83,17 +83,11 @@ int main()
     auto data_vec = builder.CreateVector(payload);
 
     auto write_cmd = CreateWriteCommand(builder, offset, data_vec);
-    auto envelope = CreateCommandEnvelope(
-        builder,
-        CommandID_WRITE,
-        Command::Command_WriteCommand,
-        write_cmd.Union());
+    auto envelope = CreateCommandEnvelope(builder, CommandID_WRITE, Command::Command_WriteCommand, write_cmd.Union());
     builder.Finish(envelope);
 
     sender.send(
-        std::span<const uint8_t>(
-            reinterpret_cast<const uint8_t *>(builder.GetBufferPointer()),
-            builder.GetSize()));
+        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(builder.GetBufferPointer()), builder.GetSize()));
 
     std::cin.get();
 

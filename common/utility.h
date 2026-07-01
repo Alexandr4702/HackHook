@@ -16,7 +16,6 @@
 
 #include "SharedBuffer.h"
 
-
 class Logger
 {
     std::ofstream file;
@@ -24,7 +23,7 @@ class Logger
     std::array<char, MAX_PATH> emergency_path{};
     std::atomic_bool emergency_path_ready = false;
 
-public:
+  public:
     Logger() = default;
 
     ~Logger()
@@ -45,7 +44,7 @@ public:
         }
     }
 
-    void init(const std::string& filename)
+    void init(const std::string &filename)
     {
         std::scoped_lock lock(log_mutex);
         if (file.is_open())
@@ -61,21 +60,19 @@ public:
     void emergency(const char *boundary, const char *details = nullptr) const noexcept;
     static void emergency_to_default(const char *boundary, const char *details = nullptr) noexcept;
 
-    template <typename T>
-    Logger& operator<<(T&& value)
+    template <typename T> Logger &operator<<(T &&value)
     {
         std::scoped_lock lock(log_mutex);
 
         if (!file.is_open())
             return *this;
 
-        file << "[" << GetTimestamp() << "] "
-             << std::forward<T>(value);
+        file << "[" << GetTimestamp() << "] " << std::forward<T>(value);
 
         return *this;
     }
 
-    Logger& operator<<(std::ostream& (*manip)(std::ostream&))
+    Logger &operator<<(std::ostream &(*manip)(std::ostream &))
     {
         std::scoped_lock lock(log_mutex);
 
@@ -95,22 +92,16 @@ public:
         std::tm tm;
         localtime_s(&tm, &t);
 
-        return std::format("{:04}-{:02}-{:02}_{:02}-{:02}-{:02}",
-                           tm.tm_year + 1900,
-                           tm.tm_mon + 1,
-                           tm.tm_mday,
-                           tm.tm_hour,
-                           tm.tm_min,
-                           tm.tm_sec);
+        return std::format("{:04}-{:02}-{:02}_{:02}-{:02}-{:02}", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                           tm.tm_hour, tm.tm_min, tm.tm_sec);
     }
-private:
 
-    Logger(const Logger&) = delete;
-    Logger& operator=(const Logger&) = delete;
+  private:
+    Logger(const Logger &) = delete;
+    Logger &operator=(const Logger &) = delete;
 };
 
-#define LOG(logger, msg) \
-    (logger) << std::format("[{}: {} ] {} \n", __FILE__, __LINE__, msg)
+#define LOG(logger, msg) (logger) << std::format("[{}: {} ] {} \n", __FILE__, __LINE__, msg)
 
 class MessageIPCSender
 {
@@ -121,12 +112,13 @@ class MessageIPCSender
     bool send(std::span<const uint8_t> bytes) noexcept;
 
     template <typename TCreateFn, typename... Args>
-    bool send_command(uint64_t request_id, Interface::CommandID id, Interface::Command type,
-                      TCreateFn create_fn, Args &&...args) noexcept
+    bool send_command(uint64_t request_id, Interface::CommandID id, Interface::Command type, TCreateFn create_fn,
+                      Args &&...args) noexcept
     {
         try
         {
-            if (!m_sharedBufferTx.is_initialized()) return false;
+            if (!m_sharedBufferTx.is_initialized())
+                return false;
 
             std::scoped_lock lck(m_mutex);
 
@@ -164,7 +156,7 @@ class MessageIPCSender
         }
     }
 
-    inline void * get_shared_buffer_pointer()
+    inline void *get_shared_buffer_pointer()
     {
         return m_sharedBufferTx.get_shared_buffer_pointer();
     }

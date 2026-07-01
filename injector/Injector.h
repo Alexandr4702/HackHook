@@ -14,7 +14,10 @@ class Injector
     bool isHooked() const;
     bool isTargetModuleLoaded() const;
     HWND getHWND() const
-    {return m_hwnd;}
+    {
+        return m_hwnd;
+    }
+
   private:
     std::wstring m_windowTitle;
     std::string m_dllName;

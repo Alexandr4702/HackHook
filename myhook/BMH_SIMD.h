@@ -1,12 +1,12 @@
 #ifndef BHM_SIMD_H
 #define BHM_SIMD_H
 
+#include "MyHookImport.h"
 #include <array>
 #include <cstdint>
 #include <cstring>
 #include <immintrin.h>
 #include <vector>
-#include "MyHookImport.h"
 
 struct SimdBmhAvx2Searcher
 {
@@ -30,6 +30,7 @@ struct SimdBmhAvx2Searcher
     }
 };
 
-MYHOOK_API std::vector<size_t> bmh_simd_avx2_all_extended(const uint8_t *hay, size_t hay_len, const SimdBmhAvx2Searcher &searcher);
+MYHOOK_API std::vector<size_t> bmh_simd_avx2_all_extended(const uint8_t *hay, size_t hay_len,
+                                                          const SimdBmhAvx2Searcher &searcher);
 
 #endif // BHM_SIMD_H

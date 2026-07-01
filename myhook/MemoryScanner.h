@@ -1,12 +1,12 @@
 #ifndef BOYERMOOREHORSPOOL_H
 #define BOYERMOOREHORSPOOL_H
 
-#include <vector>
 #include <cstdint>
-#include <span>
 #include <functional>
 #include <memory_resource>
 #include <processthreadsapi.h>
+#include <span>
+#include <vector>
 
 #include "FoundOccurrences.h"
 #include "MyHookImport.h"
@@ -31,7 +31,7 @@ class MemTool
   public:
     MemTool();
     ~MemTool();
-    static MemTool& instance()
+    static MemTool &instance()
     {
         static MemTool instance;
         return instance;
@@ -41,7 +41,7 @@ class MemTool
     MemTool(MemTool &&) = delete;
     MemTool &operator=(MemTool &&) = delete;
 
-    size_t read(uintptr_t address, void* out, size_t size);
+    size_t read(uintptr_t address, void *out, size_t size);
     bool write(uintptr_t address, const void *data, size_t size);
     std::pmr::vector<FoundOccurrences> find(std::span<const uint8_t> pattern,
                                             std::pmr::synchronized_pool_resource &pool,

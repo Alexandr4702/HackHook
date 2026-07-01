@@ -1,8 +1,8 @@
 #ifndef SHARED_BUFFER_HPP
 #define SHARED_BUFFER_HPP
 
-#include <boost/interprocess/allocators/allocator.hpp>
 #include <boost/container/vector.hpp>
+#include <boost/interprocess/allocators/allocator.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
@@ -11,8 +11,8 @@ namespace bip = boost::interprocess;
 
 class SharedBuffer
 {
-public:
-    SharedBuffer() = default; 
+  public:
+    SharedBuffer() = default;
     ~SharedBuffer() noexcept;
 
     bool is_initialized() const
@@ -28,12 +28,17 @@ public:
     void release(bool close_buffer = true) noexcept;
 
     inline void *get_shared_buffer_pointer()
-    {return start_segment_ptr;}
+    {
+        return start_segment_ptr;
+    }
     inline size_t get_shared_buffer_size() const
-    {return m_size;}
+    {
+        return m_size;
+    }
     size_t m_size = 0;
-    void* start_segment_ptr = nullptr;
-private:
+    void *start_segment_ptr = nullptr;
+
+  private:
     struct Buffer
     {
         bip::interprocess_mutex mutex;
@@ -48,12 +53,15 @@ private:
         std::size_t capacity = 0;
         bip::offset_ptr<uint8_t> data;
 
-        size_t available_space() const { return capacity - count; }
+        size_t available_space() const
+        {
+            return capacity - count;
+        }
     };
 
     std::string m_shm_name;
     bip::managed_shared_memory m_shm;
-    Buffer* m_buf = nullptr;
+    Buffer *m_buf = nullptr;
     bool m_creator = false;
 };
 

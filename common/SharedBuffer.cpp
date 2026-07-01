@@ -25,13 +25,12 @@ void SharedBuffer::init(const std::string &shm_name, std::size_t capacity, bool 
         bip::permissions perms;
         perms.set_unrestricted();
 
-        m_shm = bip::managed_shared_memory(
-            bip::create_only, shm_name.c_str(), m_size, 0, perms);
+        m_shm = bip::managed_shared_memory(bip::create_only, shm_name.c_str(), m_size, 0, perms);
 
         m_buf = m_shm.construct<Buffer>("buffer")();
         m_buf->capacity = capacity;
 
-        uint8_t* data_ptr = m_shm.construct<uint8_t>("data")[capacity]();
+        uint8_t *data_ptr = m_shm.construct<uint8_t>("data")[capacity]();
         m_buf->data = data_ptr;
     }
     else
@@ -52,12 +51,14 @@ bool SharedBuffer::produce_block(std::span<const uint8_t> src) noexcept
 {
     try
     {
-        if (!m_buf || src.size() > m_buf->capacity) return false;
+        if (!m_buf || src.size() > m_buf->capacity)
+            return false;
 
         bip::scoped_lock lock(m_buf->mutex);
         m_buf->not_full.wait(lock, [&] { return m_buf->available_space() >= src.size() || m_buf->closed; });
 
-        if (m_buf->closed || m_buf->available_space() < src.size()) return false;
+        if (m_buf->closed || m_buf->available_space() < src.size())
+            return false;
 
         std::size_t first_chunk = std::min(src.size(), m_buf->capacity - m_buf->head);
         std::copy(src.begin(), src.begin() + first_chunk, m_buf->data.get() + m_buf->head);
@@ -82,12 +83,14 @@ bool SharedBuffer::consume_block(std::span<uint8_t> dest) noexcept
 {
     try
     {
-        if (!m_buf || dest.size() > m_buf->capacity) return false;
+        if (!m_buf || dest.size() > m_buf->capacity)
+            return false;
 
         bip::scoped_lock lock(m_buf->mutex);
         m_buf->not_empty.wait(lock, [&] { return m_buf->count >= dest.size() || m_buf->closed; });
 
-        if (m_buf->closed || m_buf->count < dest.size()) return false;
+        if (m_buf->closed || m_buf->count < dest.size())
+            return false;
 
         std::size_t first_chunk = std::min(dest.size(), m_buf->capacity - m_buf->tail);
         std::copy(m_buf->data.get() + m_buf->tail, m_buf->data.get() + m_buf->tail + first_chunk, dest.begin());
@@ -112,7 +115,8 @@ void SharedBuffer::close() noexcept
 {
     try
     {
-        if (!m_buf) return;
+        if (!m_buf)
+            return;
         bip::scoped_lock lock(m_buf->mutex);
         m_buf->closed = true;
         m_buf->not_empty.notify_all();
@@ -127,7 +131,8 @@ void SharedBuffer::reset() noexcept
 {
     try
     {
-        if (!m_buf) return;
+        if (!m_buf)
+            return;
         bip::scoped_lock lock(m_buf->mutex);
         m_buf->closed = false;
         m_buf->head = 0;
@@ -146,14 +151,24 @@ void SharedBuffer::release(bool close_buffer) noexcept
 
     if (m_creator && !m_shm_name.empty())
     {
-        try { bip::shared_memory_object::remove(m_shm_name.c_str()); }
-        catch (...) {}
+        try
+        {
+            bip::shared_memory_object::remove(m_shm_name.c_str());
+        }
+        catch (...)
+        {
+        }
     }
 
     m_buf = nullptr;
     start_segment_ptr = nullptr;
-    try { m_shm = bip::managed_shared_memory{}; }
-    catch (...) {}
+    try
+    {
+        m_shm = bip::managed_shared_memory{};
+    }
+    catch (...)
+    {
+    }
     std::string{}.swap(m_shm_name);
     m_creator = false;
     m_size = 0;

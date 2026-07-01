@@ -245,10 +245,7 @@ TEST(MemoryCache, RemoveMiddleOfMergedRegion)
 
     c.remove_region({20, 10}); // [20,30)
 
-    std::set<MemoryCache::Region> expected{
-        {10, 10},
-        {30, 10}
-    };
+    std::set<MemoryCache::Region> expected{{10, 10}, {30, 10}};
 
     EXPECT_EQ(c.regions(), expected);
 }
@@ -267,7 +264,7 @@ TEST(MemoryCache, RemoveLeftPart)
 {
     MemoryCache c;
 
-    c.add_region({10, 10}); // [10,20)
+    c.add_region({10, 10});   // [10,20)
     c.remove_region({10, 5}); // [10,15)
 
     std::set<MemoryCache::Region> expected{{15, 5}};
@@ -278,7 +275,7 @@ TEST(MemoryCache, RemoveRightPart)
 {
     MemoryCache c;
 
-    c.add_region({10, 10}); // [10,20)
+    c.add_region({10, 10});   // [10,20)
     c.remove_region({15, 5}); // [15,20)
 
     std::set<MemoryCache::Region> expected{{10, 5}};
@@ -322,10 +319,7 @@ TEST(MemoryCache, RemoveNonOverlappingGap)
 
     c.remove_region({15, 5}); // [15,20)
 
-    std::set<MemoryCache::Region> expected{
-        {10, 5},
-        {20, 5}
-    };
+    std::set<MemoryCache::Region> expected{{10, 5}, {20, 5}};
 
     EXPECT_EQ(c.regions(), expected);
 }
@@ -334,16 +328,12 @@ TEST(MemoryCache, AddRegionBetweenTwoSeparateRegions)
 {
     MemoryCache c;
 
-    c.add_region({10, 10});   // [10,20)
-    c.add_region({100, 10});  // [100,110)
+    c.add_region({10, 10});  // [10,20)
+    c.add_region({100, 10}); // [100,110)
 
-    c.add_region({50, 10});   // [50,60)
+    c.add_region({50, 10}); // [50,60)
 
-    std::set<MemoryCache::Region> expected{
-        {10, 10},
-        {50, 10},
-        {100, 10}
-    };
+    std::set<MemoryCache::Region> expected{{10, 10}, {50, 10}, {100, 10}};
 
     EXPECT_EQ(c.regions(), expected);
 }
@@ -355,10 +345,7 @@ TEST(MemoryCache, AddRegionBeforeAllRegions)
     c.add_region({100, 10});
     c.add_region({10, 10});
 
-    std::set<MemoryCache::Region> expected{
-        {10, 10},
-        {100, 10}
-    };
+    std::set<MemoryCache::Region> expected{{10, 10}, {100, 10}};
 
     EXPECT_EQ(c.regions(), expected);
 }
@@ -370,10 +357,7 @@ TEST(MemoryCache, AddRegionAfterAllRegions)
     c.add_region({10, 10});
     c.add_region({100, 10});
 
-    std::set<MemoryCache::Region> expected{
-        {10, 10},
-        {100, 10}
-    };
+    std::set<MemoryCache::Region> expected{{10, 10}, {100, 10}};
 
     EXPECT_EQ(c.regions(), expected);
 }
@@ -382,15 +366,12 @@ TEST(MemoryCache, AddRegionOverlapOnlyRightNeighbour)
 {
     MemoryCache c;
 
-    c.add_region({10, 10});   // [10,20)
-    c.add_region({50, 10});   // [50,60)
+    c.add_region({10, 10}); // [10,20)
+    c.add_region({50, 10}); // [50,60)
 
-    c.add_region({45, 10});   // [45,55)
+    c.add_region({45, 10}); // [45,55)
 
-    std::set<MemoryCache::Region> expected{
-        {10, 10},
-        {45, 15}
-    };
+    std::set<MemoryCache::Region> expected{{10, 10}, {45, 15}};
 
     EXPECT_EQ(c.regions(), expected);
 }
@@ -399,15 +380,12 @@ TEST(MemoryCache, AddRegionOverlapOnlyLeftNeighbour)
 {
     MemoryCache c;
 
-    c.add_region({10, 10});   // [10,20)
-    c.add_region({50, 10});   // [50,60)
+    c.add_region({10, 10}); // [10,20)
+    c.add_region({50, 10}); // [50,60)
 
-    c.add_region({15, 10});   // [15,25)
+    c.add_region({15, 10}); // [15,25)
 
-    std::set<MemoryCache::Region> expected{
-        {10, 15},
-        {50, 10}
-    };
+    std::set<MemoryCache::Region> expected{{10, 15}, {50, 10}};
 
     EXPECT_EQ(c.regions(), expected);
 }
@@ -416,15 +394,12 @@ TEST(MemoryCache, RemoveRegionFromGap)
 {
     MemoryCache c;
 
-    c.add_region({10, 10});   // [10,20)
-    c.add_region({50, 10});   // [50,60)
+    c.add_region({10, 10}); // [10,20)
+    c.add_region({50, 10}); // [50,60)
 
     c.remove_region({25, 10}); // [25,35)
 
-    std::set<MemoryCache::Region> expected{
-        {10, 10},
-        {50, 10}
-    };
+    std::set<MemoryCache::Region> expected{{10, 10}, {50, 10}};
 
     EXPECT_EQ(c.regions(), expected);
 }
@@ -433,15 +408,12 @@ TEST(MemoryCache, RemoveRegionTouchingGapLeftEdge)
 {
     MemoryCache c;
 
-    c.add_region({10, 10});   // [10,20)
-    c.add_region({30, 10});   // [30,40)
+    c.add_region({10, 10}); // [10,20)
+    c.add_region({30, 10}); // [30,40)
 
     c.remove_region({20, 10}); // [20,30)
 
-    std::set<MemoryCache::Region> expected{
-        {10, 10},
-        {30, 10}
-    };
+    std::set<MemoryCache::Region> expected{{10, 10}, {30, 10}};
 
     EXPECT_EQ(c.regions(), expected);
 }
@@ -456,9 +428,7 @@ TEST(MemoryCache, AddHugeCoveringRegion)
 
     c.add_region({0, 100});
 
-    std::set<MemoryCache::Region> expected{
-        {0, 100}
-    };
+    std::set<MemoryCache::Region> expected{{0, 100}};
 
     EXPECT_EQ(c.regions(), expected);
 }
@@ -467,9 +437,9 @@ TEST(MemoryCache, RemoveRegionLeavingTwoOuterFragments)
 {
     MemoryCache c;
 
-    c.add_region({10, 5});   // [10,15)
-    c.add_region({20, 5});   // [20,25)
-    c.add_region({30, 5});   // [30,35)
+    c.add_region({10, 5}); // [10,15)
+    c.add_region({20, 5}); // [20,25)
+    c.add_region({30, 5}); // [30,35)
 
     c.remove_region({12, 21}); // [12,33)
 
@@ -490,9 +460,7 @@ TEST(MemoryCache, RemoveOneOfOverlappingViewsKeepsSharedPart)
 
     c.remove_view(10, 10, Interface::ValueType_Int32);
 
-    std::set<MemoryCache::Region> expected{
-        {15, 10}
-    };
+    std::set<MemoryCache::Region> expected{{15, 10}};
 
     EXPECT_EQ(c.regions(), expected);
 }
@@ -523,9 +491,7 @@ TEST(MemoryCache, SameRangeDifferentTypes)
 
     ASSERT_EQ(c.views().size(), 1);
 
-    std::set<MemoryCache::Region> expected{
-        {10, 10}
-    };
+    std::set<MemoryCache::Region> expected{{10, 10}};
 
     EXPECT_EQ(c.regions(), expected);
 }
@@ -540,10 +506,7 @@ TEST(MemoryCache, RemoveMiddleViewLeavesTwoFragments)
 
     c.remove_view(10, 30, Interface::ValueType_Int32);
 
-    std::set<MemoryCache::Region> expected{
-        {10, 10},
-        {30, 10}
-    };
+    std::set<MemoryCache::Region> expected{{10, 10}, {30, 10}};
 
     EXPECT_EQ(c.regions(), expected);
 }

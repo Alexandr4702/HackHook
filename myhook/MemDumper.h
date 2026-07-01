@@ -6,9 +6,9 @@
 #include <winternl.h>
 #include <psapi.h>
 
-#include <vector>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "common/utility.h"
 

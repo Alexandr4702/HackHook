@@ -1,0 +1,20 @@
+#!/bin/sh
+
+if ! command -v clang-format >/dev/null 2>&1; then
+    echo "clang-format is required to commit C/C++ changes." >&2
+    exit 1
+fi
+
+git diff --cached --name-only --diff-filter=ACMR | while IFS= read -r file; do
+    case "$file" in
+        flatbuffers/* | *.c | *.cc | *.cpp | *.cxx | *.h | *.hh | *.hpp | *.hxx)
+            if [ "${file#flatbuffers/}" != "$file" ]; then
+                continue
+            fi
+            if ! clang-format --dry-run --Werror --style=file -- "$file"; then
+                echo "Run clang-format on $file before committing." >&2
+                exit 1
+            fi
+            ;;
+    esac
+done

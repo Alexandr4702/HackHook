@@ -1,10 +1,10 @@
 #ifndef MYHOOK_H_
 #define MYHOOK_H_
 
+#include "MemoryScanner.h"
 #include "common/common.h"
 #include "common/utility.h"
 #include <atomic>
-#include "MemoryScanner.h"
 
 #include <memory_resource>
 
@@ -19,6 +19,7 @@ class MyHook
     void stop();
 
     Logger m_log;
+
   private:
     MyHook(const MyHook &) = delete;
     MyHook &operator=(const MyHook &) = delete;
@@ -51,9 +52,9 @@ class MyHook
     MessageIPCSender m_sender;
     SharedBuffer m_reciver;
     std::optional<MemTool> m_memTool;
-  
+
     const size_t allocate_size = 128 * 1024 * 1024;
-    void* m_pmrPoolMem = nullptr;
+    void *m_pmrPoolMem = nullptr;
     std::pmr::monotonic_buffer_resource m_monotonicPool;
     std::pmr::synchronized_pool_resource m_pool;
 

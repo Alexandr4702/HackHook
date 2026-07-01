@@ -1,17 +1,17 @@
-#include <tbb/parallel_pipeline.h>
-#include <tbb/concurrent_vector.h>
-#include <tbb/task_arena.h>
-#include <fstream>
-#include <vector>
-#include <string>
-#include <memory>
-#include <iostream>
 #include <algorithm>
+#include <fstream>
 #include <iomanip>
+#include <iostream>
+#include <memory>
+#include <string>
+#include <tbb/concurrent_vector.h>
+#include <tbb/parallel_pipeline.h>
+#include <tbb/task_arena.h>
+#include <vector>
 
 class ParallelCSVParser
 {
-public:
+  public:
     struct MemoryRegion
     {
         uint64_t BaseAddress;
@@ -25,7 +25,10 @@ public:
         std::string SectionName;
         bool operator==(const MemoryRegion &other) const
         {
-            return BaseAddress == other.BaseAddress && RegionSize == other.RegionSize && DumpOffset == other.DumpOffset && DumpSize == other.DumpSize && State == other.State && Protect == other.Protect && Type == other.Type && ModuleName == other.ModuleName && SectionName == other.SectionName;
+            return BaseAddress == other.BaseAddress && RegionSize == other.RegionSize &&
+                   DumpOffset == other.DumpOffset && DumpSize == other.DumpSize && State == other.State &&
+                   Protect == other.Protect && Type == other.Type && ModuleName == other.ModuleName &&
+                   SectionName == other.SectionName;
         }
     };
 
@@ -45,52 +48,36 @@ public:
         tbb::parallel_pipeline(
             std::thread::hardware_concurrency(),
 
-            tbb::make_filter<void, std::string>(
-                tbb::filter_mode::serial_in_order,
-                [&](tbb::flow_control &fc) -> std::string
-                {
-                    if (!std::getline(file, line))
-                    {
-                        fc.stop();
-                        return "";
-                    }
-                    return line;
-                }) &
+            tbb::make_filter<void, std::string>(tbb::filter_mode::serial_in_order,
+                                                [&](tbb::flow_control &fc) -> std::string {
+                                                    if (!std::getline(file, line))
+                                                    {
+                                                        fc.stop();
+                                                        return "";
+                                                    }
+                                                    return line;
+                                                }) &
 
-                tbb::make_filter<std::string, MemoryRegion>(
-                    tbb::filter_mode::parallel,
-                    [](const std::string &line)
-                    {
-                        return ParseLine(line);
-                    }) &
+                tbb::make_filter<std::string, MemoryRegion>(tbb::filter_mode::parallel,
+                                                            [](const std::string &line) { return ParseLine(line); }) &
 
-                tbb::make_filter<MemoryRegion, void>(
-                    tbb::filter_mode::serial_in_order,
-                    [&](const MemoryRegion &region)
-                    {
-                        result.push_back(region);
-                    }));
+                tbb::make_filter<MemoryRegion, void>(tbb::filter_mode::serial_in_order,
+                                                     [&](const MemoryRegion &region) { result.push_back(region); }));
 
         file.close();
         return {result.begin(), result.end()};
     }
 
-private:
+  private:
     static MemoryRegion ParseLine(const std::string &line)
     {
         MemoryRegion region;
         size_t start = 0;
         size_t end = line.find(',');
 
-        auto parseHex = [](const std::string &s)
-        {
-            return std::stoull(s, nullptr, 16);
-        };
+        auto parseHex = [](const std::string &s) { return std::stoull(s, nullptr, 16); };
 
-        auto parseUll = [](const std::string &s)
-        {
-            return std::stoull(s, nullptr, 10);
-        };
+        auto parseUll = [](const std::string &s) { return std::stoull(s, nullptr, 10); };
 
         // BaseAddress
         if (end != std::string::npos)
@@ -203,7 +190,9 @@ std::ostream &operator<<(std::ostream &os, const std::span<char> data)
 
 std::ostream &operator<<(std::ostream &os, const ParallelCSVParser::MemoryRegion &data)
 {
-    std::cout << std::format("{:016x} {:016x} {:016x} {:016x} {:s} {:s} {:s} {:s} {:s}", data.BaseAddress, data.RegionSize, data.DumpOffset, data.DumpSize, data.State, data.Protect, data.Type, data.ModuleName, data.SectionName);
+    std::cout << std::format("{:016x} {:016x} {:016x} {:016x} {:s} {:s} {:s} {:s} {:s}", data.BaseAddress,
+                             data.RegionSize, data.DumpOffset, data.DumpSize, data.State, data.Protect, data.Type,
+                             data.ModuleName, data.SectionName);
     return os;
 }
 
@@ -230,8 +219,8 @@ std::u16string ascii2utf16(std::string_view ascii_str)
 uint64_t dumpOffset2VirtualAddress(const std::vector<ParallelCSVParser::MemoryRegion> &regions, uint64_t dumpOffset)
 {
     ParallelCSVParser::MemoryRegion reg = {.DumpOffset = dumpOffset};
-    auto region = upper_bound(regions.begin(), regions.end(), reg, [](const auto &a, const auto &b)
-                              { return a.DumpOffset < b.DumpOffset; });
+    auto region = upper_bound(regions.begin(), regions.end(), reg,
+                              [](const auto &a, const auto &b) { return a.DumpOffset < b.DumpOffset; });
     --region;
     if (dumpOffset >= region->DumpOffset && dumpOffset <= region->DumpOffset + region->DumpSize)
     {
@@ -245,8 +234,8 @@ uint64_t virtualAddress2dumpOffset(const std::vector<ParallelCSVParser::MemoryRe
 {
 
     ParallelCSVParser::MemoryRegion reg = {.DumpOffset = virtualAddress};
-    auto region = upper_bound(regions.begin(), regions.end(), reg, [](const auto &a, const auto &b)
-                              { return a.BaseAddress < b.BaseAddress; });
+    auto region = upper_bound(regions.begin(), regions.end(), reg,
+                              [](const auto &a, const auto &b) { return a.BaseAddress < b.BaseAddress; });
     --region;
     if (virtualAddress >= region->BaseAddress && virtualAddress <= region->BaseAddress + region->DumpSize)
     {
@@ -264,8 +253,9 @@ int main()
         auto regions = ParallelCSVParser::ParseFile("./mem_map.csv");
         auto regionsCopy = regions;
 
-        sort(regions.begin(), regions.end(), [](const auto &a, const auto &b)
-             { return std::tie(a.DumpOffset, a.BaseAddress) < std::tie(b.DumpOffset, b.BaseAddress); });
+        sort(regions.begin(), regions.end(), [](const auto &a, const auto &b) {
+            return std::tie(a.DumpOffset, a.BaseAddress) < std::tie(b.DumpOffset, b.BaseAddress);
+        });
 
         // for (size_t i = 0; i < std::min(size_t(120), regions.size()); ++i)
         // {
@@ -289,14 +279,10 @@ int main()
         for (const auto &region : regions)
         {
             // break;
-            if (region.State == "COMMIT" &&
-                region.Protect == "READWRITE" &&
-                region.Type == "PRIVATE" &&
-                region.ModuleName.empty() &&
-                region.SectionName.empty())
+            if (region.State == "COMMIT" && region.Protect == "READWRITE" && region.Type == "PRIVATE" &&
+                region.ModuleName.empty() && region.SectionName.empty())
             {
-                if (region.DumpSize == 0 ||
-                    region.DumpOffset + region.DumpSize > fileSize)
+                if (region.DumpSize == 0 || region.DumpOffset + region.DumpSize > fileSize)
                 {
                     continue;
                 }
@@ -317,78 +303,34 @@ int main()
         cout << "Total regions size: " << regionsSize / 1024 / 1024 << endl;
 
         vector<pair<uint64_t, std::string>> offsetsNames = {
-            {0x3D5C6158, "Abdurait"},
-            {0x6EF44B00, "Abdurait"},
-            {0x91AAA800, "Abdurait"},
-            {0x91AAA820, "Abdurait"},
-            {0x92608B80, "Abdurait"},
-            {0x926093E0, "Abdurait"},
-            {0x92609E00, "Abdurait"},
-            {0xA927C600, "Abdurait"},
-            {0x76D3ADD0, "Angron"},
-            {0x76D3BBD0, "Angron"},
-            {0x76D3C7A0, "Angron"},
-            {0x76D43AD0, "Angron"},
-            {0x76D44BD0, "Angron"},
-            {0x76D44F10, "Angron"},
-            {0x7C55B618, "Angron"},
-            {0x876C00C0, "Angron"},
-            {0x918418B0, "Angron"},
-            {0x9184AA50, "Angron"},
-            {0xA9139298, "Angron"},
-            {0xA9141980, "Angron"},
-            {0x76D40CE0, "Arshir"},
-            {0x76D47FB0, "Arshir"},
-            {0x86732640, "Arshir"},
-            {0x867340F0, "Arshir"},
-            {0x86734270, "Arshir"},
-            {0x86735D10, "Arshir"},
-            {0xA927C140, "Arshir"},
-            {0xA927C798, "Arshir"},
-            {0x3D5D4A18, "Gomboev"},
-            {0x40717F80, "Gomboev"},
-            {0x40718F20, "Gomboev"},
-            {0x76C68D80, "Gomboev"},
-            {0x916399E0, "Gomboev"},
-            {0x916399F0, "Gomboev"},
-            {0x91639DC0, "Gomboev"},
-            {0x91639DD0, "Gomboev"},
-            {0x86116050, "Jabkoa"},
-            {0x86731620, "Jabkoa"},
-            {0x867316B0, "Jabkoa"},
-            {0x86734AB0, "Jabkoa"},
-            {0x86734F40, "Jabkoa"},
-            {0x867357C0, "Jabkoa"},
-            {0xA927FA80, "Jabkoa"},
-            {0xA9280A58, "Jabkoa"},
-            {0x8B7F9E00, "Paveleva"},
-            {0x8B7F9E80, "Paveleva"},
-            {0x91AA8B80, "Paveleva"},
-            {0x91AA9160, "Paveleva"},
-            {0x91AA9260, "Paveleva"},
-            {0x91AA9CA0, "Paveleva"},
-            {0xA927A5D8, "Paveleva"},
-            {0xA927B480, "Paveleva"},
-            {0x9162D340, "Suihita"},
-            {0x91637630, "Suihita"},
-            {0x91638840, "Suihita"},
-            {0x91638E30, "Suihita"},
-            {0x963C30E0, "Suihita"},
-            {0x963C3100, "Suihita"},
-            {0xA9276F40, "Suihita"},
-            {0xA927B6D8, "Suihita"}};
+            {0x3D5C6158, "Abdurait"}, {0x6EF44B00, "Abdurait"}, {0x91AAA800, "Abdurait"}, {0x91AAA820, "Abdurait"},
+            {0x92608B80, "Abdurait"}, {0x926093E0, "Abdurait"}, {0x92609E00, "Abdurait"}, {0xA927C600, "Abdurait"},
+            {0x76D3ADD0, "Angron"},   {0x76D3BBD0, "Angron"},   {0x76D3C7A0, "Angron"},   {0x76D43AD0, "Angron"},
+            {0x76D44BD0, "Angron"},   {0x76D44F10, "Angron"},   {0x7C55B618, "Angron"},   {0x876C00C0, "Angron"},
+            {0x918418B0, "Angron"},   {0x9184AA50, "Angron"},   {0xA9139298, "Angron"},   {0xA9141980, "Angron"},
+            {0x76D40CE0, "Arshir"},   {0x76D47FB0, "Arshir"},   {0x86732640, "Arshir"},   {0x867340F0, "Arshir"},
+            {0x86734270, "Arshir"},   {0x86735D10, "Arshir"},   {0xA927C140, "Arshir"},   {0xA927C798, "Arshir"},
+            {0x3D5D4A18, "Gomboev"},  {0x40717F80, "Gomboev"},  {0x40718F20, "Gomboev"},  {0x76C68D80, "Gomboev"},
+            {0x916399E0, "Gomboev"},  {0x916399F0, "Gomboev"},  {0x91639DC0, "Gomboev"},  {0x91639DD0, "Gomboev"},
+            {0x86116050, "Jabkoa"},   {0x86731620, "Jabkoa"},   {0x867316B0, "Jabkoa"},   {0x86734AB0, "Jabkoa"},
+            {0x86734F40, "Jabkoa"},   {0x867357C0, "Jabkoa"},   {0xA927FA80, "Jabkoa"},   {0xA9280A58, "Jabkoa"},
+            {0x8B7F9E00, "Paveleva"}, {0x8B7F9E80, "Paveleva"}, {0x91AA8B80, "Paveleva"}, {0x91AA9160, "Paveleva"},
+            {0x91AA9260, "Paveleva"}, {0x91AA9CA0, "Paveleva"}, {0xA927A5D8, "Paveleva"}, {0xA927B480, "Paveleva"},
+            {0x9162D340, "Suihita"},  {0x91637630, "Suihita"},  {0x91638840, "Suihita"},  {0x91638E30, "Suihita"},
+            {0x963C30E0, "Suihita"},  {0x963C3100, "Suihita"},  {0xA9276F40, "Suihita"},  {0xA927B6D8, "Suihita"}};
 
         for (auto [offset, name] : offsetsNames)
         {
             ParallelCSVParser::MemoryRegion reg = {.DumpOffset = offset};
-            auto region = upper_bound(regions.begin(), regions.end(), reg, [](const auto &a, const auto &b)
-                                      { return a.DumpOffset < b.DumpOffset; });
+            auto region = upper_bound(regions.begin(), regions.end(), reg,
+                                      [](const auto &a, const auto &b) { return a.DumpOffset < b.DumpOffset; });
             --region;
             if (offset >= region->DumpOffset && offset <= region->DumpOffset + region->DumpSize)
             {
                 span<char> nameBytes = {reinterpret_cast<char *>(ascii2utf16(name).data()), name.size() * 2};
                 cout << format("0x{:X} (Base: 0x{:X}, Size: {:d}, Dump Offset: 0x{:X}, Iternal offset: {}) - {} ",
-                               offset, region->BaseAddress, region->RegionSize, region->DumpOffset, offset - region->DumpOffset, name);
+                               offset, region->BaseAddress, region->RegionSize, region->DumpOffset,
+                               offset - region->DumpOffset, name);
                 cout << nameBytes << endl;
                 const size_t readSize = 64;
                 size_t bytesToRead = min(static_cast<size_t>(readSize), region->DumpSize);

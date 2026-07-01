@@ -72,20 +72,23 @@ LONG CALLBACK veh_handler(EXCEPTION_POINTERS *e)
 Region GetCurrentThreadStackRegion()
 {
     // Get stack region
-    auto teb = (NT_TIB*)NtCurrentTeb();
+    auto teb = (NT_TIB *)NtCurrentTeb();
     Region currentThreadStack;
-    currentThreadStack.start = std::min(reinterpret_cast<uint8_t*>(teb->StackLimit), reinterpret_cast<uint8_t*>(teb->StackBase));
-    currentThreadStack.end   = std::max(reinterpret_cast<uint8_t*>(teb->StackLimit), reinterpret_cast<uint8_t*>(teb->StackBase));
+    currentThreadStack.start =
+        std::min(reinterpret_cast<uint8_t *>(teb->StackLimit), reinterpret_cast<uint8_t *>(teb->StackBase));
+    currentThreadStack.end =
+        std::max(reinterpret_cast<uint8_t *>(teb->StackLimit), reinterpret_cast<uint8_t *>(teb->StackBase));
     return currentThreadStack;
 }
 } // namespace
 
-std::pmr::vector<FoundOccurrences> MemTool::find(std::span<const uint8_t> pattern, std::pmr::synchronized_pool_resource& pool, std::pmr::vector<Region>&& exludeReg)
+std::pmr::vector<FoundOccurrences> MemTool::find(std::span<const uint8_t> pattern,
+                                                 std::pmr::synchronized_pool_resource &pool,
+                                                 std::pmr::vector<Region> &&exludeReg)
 {
     std::pmr::vector<FoundOccurrences> result(&pool);
     std::vector<MEMORY_BASIC_INFORMATION> regions = enum_regions();
     std::vector<Region> excludedRegions;
-    
 
     excludedRegions.push_back(GetCurrentThreadStackRegion());
     excludedRegions.push_back(GetMyDllRegion());
@@ -111,11 +114,8 @@ std::pmr::vector<FoundOccurrences> MemTool::find(std::span<const uint8_t> patter
     const std::boyer_moore_horspool_searcher<const uint8_t *> searcher(pattern.data(), pattern.data() + pattern.size());
     const SimdBmhAvx2Searcher searcher_Avx2(pattern.data(), pattern.size());
 
-
-    auto worker = [&regions, &searcher, &searcher_Avx2, &pattern, &results, &excludedRegions,
-                   &waitForAddingStacks, &startThreads, &regions_cnt, &thread_stack_region,
-                   &worker_failed](int threadId) {
-
+    auto worker = [&regions, &searcher, &searcher_Avx2, &pattern, &results, &excludedRegions, &waitForAddingStacks,
+                   &startThreads, &regions_cnt, &thread_stack_region, &worker_failed](int threadId) {
         thread_stack_region[threadId] = GetCurrentThreadStackRegion();
         waitForAddingStacks.count_down();
         startThreads.acquire();
@@ -128,7 +128,7 @@ std::pmr::vector<FoundOccurrences> MemTool::find(std::span<const uint8_t> patter
                 size_t i = regions_cnt.fetch_add(1, std::memory_order_relaxed);
                 if (i >= regions.size())
                     return;
-                const MEMORY_BASIC_INFORMATION& region = regions[i];
+                const MEMORY_BASIC_INFORMATION &region = regions[i];
 
                 if (setjmp(g_jump) != 0)
                     continue;
@@ -224,13 +224,13 @@ std::pmr::vector<FoundOccurrences> MemTool::find(std::span<const uint8_t> patter
     return result;
 }
 
-size_t MemTool::read(uintptr_t address, void* out, size_t size)
+size_t MemTool::read(uintptr_t address, void *out, size_t size)
 {
     if (!out || size == 0)
         return 0;
 
-    auto* src = reinterpret_cast<const std::byte*>(address);
-    auto* dst = reinterpret_cast<std::byte*>(out);
+    auto *src = reinterpret_cast<const std::byte *>(address);
+    auto *dst = reinterpret_cast<std::byte *>(out);
 
     size_t totalRead = 0;
 
@@ -246,13 +246,8 @@ size_t MemTool::read(uintptr_t address, void* out, size_t size)
 
         const DWORD protect = mbi.Protect & 0xff;
 
-        constexpr DWORD readable =
-            PAGE_READONLY |
-            PAGE_READWRITE |
-            PAGE_WRITECOPY |
-            PAGE_EXECUTE_READ |
-            PAGE_EXECUTE_READWRITE |
-            PAGE_EXECUTE_WRITECOPY;
+        constexpr DWORD readable = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ |
+                                   PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
 
         if ((protect & readable) == 0)
             break;
@@ -260,14 +255,9 @@ size_t MemTool::read(uintptr_t address, void* out, size_t size)
         if (protect & (PAGE_GUARD | PAGE_NOACCESS))
             break;
 
-        const auto regionEnd =
-            reinterpret_cast<uintptr_t>(mbi.BaseAddress) +
-            mbi.RegionSize;
+        const auto regionEnd = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
 
-        const size_t chunk =
-            std::min(
-                size - totalRead,
-                regionEnd - reinterpret_cast<uintptr_t>(src));
+        const size_t chunk = std::min(size - totalRead, regionEnd - reinterpret_cast<uintptr_t>(src));
 
         if (setjmp(g_jump) != 0)
             break;
@@ -284,24 +274,21 @@ size_t MemTool::read(uintptr_t address, void* out, size_t size)
     return totalRead;
 }
 
-bool MemTool::write(uintptr_t address, const void* data, size_t size)
+bool MemTool::write(uintptr_t address, const void *data, size_t size)
 {
     if (!data || size == 0)
         return false;
 
     MEMORY_BASIC_INFORMATION mbi{};
 
-    if (VirtualQuery(reinterpret_cast<void*>(address), &mbi, sizeof(mbi)) != sizeof(mbi))
+    if (VirtualQuery(reinterpret_cast<void *>(address), &mbi, sizeof(mbi)) != sizeof(mbi))
         return false;
 
     if (mbi.State != MEM_COMMIT)
         return false;
 
     const bool writable =
-        (mbi.Protect & (PAGE_READWRITE |
-                        PAGE_EXECUTE_READWRITE |
-                        PAGE_WRITECOPY)) &&
-        !(mbi.Protect & PAGE_GUARD);
+        (mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE | PAGE_WRITECOPY)) && !(mbi.Protect & PAGE_GUARD);
 
     if (!writable)
         return false;
@@ -327,6 +314,6 @@ MemTool::MemTool()
 
 MemTool::~MemTool()
 {
-    if(m_veHandle)
+    if (m_veHandle)
         RemoveVectoredExceptionHandler(m_veHandle);
 }

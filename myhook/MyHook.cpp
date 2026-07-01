@@ -1,28 +1,28 @@
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstddef>
+#include <exception>
+#include <format>
 #include <fstream>
-#include <thread>
+#include <iomanip>
+#include <memory>
+#include <sstream>
 #include <string>
 #include <string_view>
-#include <sstream>
-#include <iomanip>
-#include <array>
-#include <exception>
-#include <memory>
+#include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
-#include <unordered_map>
-#include <format>
 
 #include <windows.h>
 #include <tlhelp32.h>
 #include <winternl.h>
 #include <psapi.h>
 
-#include "MyHook.h"
 #include "MemDumper.h"
 #include "MemoryScanner.h"
+#include "MyHook.h"
 #include "interface_generated.h"
 
 void SendKeyToWindow(HWND hWnd, char key);
@@ -67,14 +67,13 @@ std::string utf8(std::wstring_view text)
     if (text.empty())
         return {};
 
-    const int size = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0,
-                                         nullptr, nullptr);
+    const int size =
+        WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
     if (size <= 0)
         return {};
 
     std::string result(static_cast<size_t>(size), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), result.data(), size, nullptr,
-                        nullptr);
+    WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), result.data(), size, nullptr, nullptr);
     return result;
 }
 
@@ -120,7 +119,7 @@ RegionMetadata query_region_metadata(uintptr_t address)
 
     std::array<wchar_t, 32768> mappedPath{};
     const DWORD mappedLength = GetMappedFileNameW(GetCurrentProcess(), reinterpret_cast<void *>(address),
-                                                   mappedPath.data(), static_cast<DWORD>(mappedPath.size()));
+                                                  mappedPath.data(), static_cast<DWORD>(mappedPath.size()));
     if (mappedLength != 0 && mappedLength < mappedPath.size())
         result.mappedPath = utf8(std::wstring_view(mappedPath.data(), mappedLength));
 
@@ -205,8 +204,10 @@ MyHook &MyHook::getInstance()
     return *instance;
 }
 
-MyHook::MyHook(): allocate_size(128 * 1024 * 1024), m_pmrPoolMem(VirtualAlloc(nullptr, allocate_size,
-                                MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)), m_monotonicPool(m_pmrPoolMem, allocate_size), m_pool(&m_monotonicPool)
+MyHook::MyHook()
+    : allocate_size(128 * 1024 * 1024),
+      m_pmrPoolMem(VirtualAlloc(nullptr, allocate_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)),
+      m_monotonicPool(m_pmrPoolMem, allocate_size), m_pool(&m_monotonicPool)
 {
 }
 
@@ -220,10 +221,30 @@ void MyHook::shutdown() noexcept
     if (m_shutdown.exchange(true, std::memory_order_acq_rel))
         return;
 
-    try { m_memTool.reset(); } catch (...) { report_boundary_error(&m_log, "MyHook::shutdown MemTool"); }
-    try { m_reciver.release(); } catch (...) { report_boundary_error(&m_log, "MyHook::shutdown receiver"); }
-    try { m_sender.release(!m_stopAcknowledged.load(std::memory_order_acquire)); }
-    catch (...) { report_boundary_error(&m_log, "MyHook::shutdown sender"); }
+    try
+    {
+        m_memTool.reset();
+    }
+    catch (...)
+    {
+        report_boundary_error(&m_log, "MyHook::shutdown MemTool");
+    }
+    try
+    {
+        m_reciver.release();
+    }
+    catch (...)
+    {
+        report_boundary_error(&m_log, "MyHook::shutdown receiver");
+    }
+    try
+    {
+        m_sender.release(!m_stopAcknowledged.load(std::memory_order_acquire));
+    }
+    catch (...)
+    {
+        report_boundary_error(&m_log, "MyHook::shutdown sender");
+    }
 
     try
     {
@@ -242,8 +263,14 @@ void MyHook::shutdown() noexcept
     }
 
     std::string{}.swap(g_params.logDumpLocation);
-    try { LOG(m_log, "MyHook stopped and resources released"); }
-    catch (...) { report_boundary_error(&m_log, "MyHook::shutdown log"); }
+    try
+    {
+        LOG(m_log, "MyHook stopped and resources released");
+    }
+    catch (...)
+    {
+        report_boundary_error(&m_log, "MyHook::shutdown log");
+    }
     m_log.close();
 }
 
@@ -266,8 +293,7 @@ void MyHook::start() noexcept
 
     try
     {
-        if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-                                reinterpret_cast<LPCSTR>(&HookProc), &module))
+        if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<LPCSTR>(&HookProc), &module))
         {
             cleanup_failed_start();
             return;
@@ -404,7 +430,8 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
             LOG(m_log, "WRITE failed");
 
         const auto response = ok ? Interface::CommandID::CommandID_ACK : Interface::CommandID::CommandID_NACK;
-        m_sender.send_command(msg->request_id(), response, Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+        m_sender.send_command(msg->request_id(), response, Interface::Command::Command_NONE,
+                              Interface::CreateEmptyCommand);
 
         break;
     }
@@ -454,8 +481,8 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
         const auto readed = m_memTool->read(cmd->offset(), readed_data.data(), cmd->size());
         const uintptr_t metadataAddress = cmd->metadata_address() != 0 ? cmd->metadata_address() : cmd->offset();
         auto metadata = query_region_metadata(metadataAddress);
-        auto read_ack_func = [data = std::move(readed_data), readed, metadata = std::move(metadata)](
-                                 flatbuffers::FlatBufferBuilder &builder) {
+        auto read_ack_func = [data = std::move(readed_data), readed,
+                              metadata = std::move(metadata)](flatbuffers::FlatBufferBuilder &builder) {
             flatbuffers::Offset<Interface::MemoryRegionInfo> region;
             if (metadata.available)
             {
@@ -467,9 +494,8 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
                     metadata.allocationProtect, metadata.regionSize, metadata.state, metadata.protect, metadata.type,
                     metadata.moduleBase, metadata.moduleSize, moduleName, modulePath, mappedPath, metadata.isHeap,
                     metadata.heapHandle, metadata.heapBlock, metadata.heapBlockSize, metadata.heapFlags,
-                    metadata.workingSetQueried, metadata.workingSetValid, metadata.workingSetProtect,
-                    metadata.numaNode, metadata.shareCount, metadata.shared, metadata.locked, metadata.largePage,
-                    metadata.bad);
+                    metadata.workingSetQueried, metadata.workingSetValid, metadata.workingSetProtect, metadata.numaNode,
+                    metadata.shareCount, metadata.shared, metadata.locked, metadata.largePage, metadata.bad);
             }
             return Interface::CreateRegionReadAck(builder, builder.CreateVector(data.data(), readed), region);
         };
@@ -488,7 +514,8 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
         std::string dump_location = g_params.logDumpLocation + "dump_" + Logger::GetTimestamp() + "\\";
         CreateDirectory(dump_location.c_str(), nullptr);
         MemRead(dump_location, *m_memTool);
-        m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+        m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_ACK, Interface::Command::Command_NONE,
+                              Interface::CreateEmptyCommand);
         break;
     }
     case Interface::CommandID_FIND: {
@@ -567,9 +594,9 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
     }
     case Interface::CommandID_STOP: {
         m_state.store(State::Stopping, std::memory_order_release);
-        const bool acknowledged = m_sender.send_command(
-            msg->request_id(), Interface::CommandID::CommandID_ACK,
-            Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+        const bool acknowledged =
+            m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_ACK,
+                                  Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
         m_stopAcknowledged.store(acknowledged, std::memory_order_release);
         // Keep consuming until the injector has removed the Windows hook and
         // sends the explicit unload-safe FINALIZE command.
@@ -577,9 +604,9 @@ void MyHook::HandleMessage(const Interface::CommandEnvelope *msg)
     }
     case Interface::CommandID_FINALIZE: {
         m_state.store(State::Stopping, std::memory_order_release);
-        const bool acknowledged = m_sender.send_command(
-            msg->request_id(), Interface::CommandID::CommandID_ACK,
-            Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
+        const bool acknowledged =
+            m_sender.send_command(msg->request_id(), Interface::CommandID::CommandID_ACK,
+                                  Interface::Command::Command_NONE, Interface::CreateEmptyCommand);
         m_stopAcknowledged.store(acknowledged, std::memory_order_release);
         // FINALIZE is only sent after UnhookWindowsHookEx and the target-thread
         // barrier have both completed.
@@ -620,8 +647,8 @@ DWORD WINAPI MyHook::MsgConsumerThread()
     std::pmr::vector<uint8_t> buff(&m_pool);
     buff.resize(4);
 
-    if (!m_sender.send_command(0, Interface::CommandID_READY,
-                               Interface::Command::Command_NONE, Interface::CreateEmptyCommand))
+    if (!m_sender.send_command(0, Interface::CommandID_READY, Interface::Command::Command_NONE,
+                               Interface::CreateEmptyCommand))
     {
         return ERROR_WRITE_FAULT;
     }

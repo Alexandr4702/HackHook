@@ -21,16 +21,14 @@ class RpcClient
     }
 
     template <typename TCreateFn, typename... Args>
-    bool send_rpc(Interface::CommandID id, Interface::Command type, TCreateFn create_fn,
-                  Args &&...args)
+    bool send_rpc(Interface::CommandID id, Interface::Command type, TCreateFn create_fn, Args &&...args)
     {
-        return m_sender.send_command(next_request_id(), id, type, create_fn,
-                                     std::forward<Args>(args)...);
+        return m_sender.send_command(next_request_id(), id, type, create_fn, std::forward<Args>(args)...);
     }
 
     template <typename TCreateFn, typename... Args>
-    bool send_rpc_cb(Callback callback, Interface::CommandID id, Interface::Command type,
-                     TCreateFn create_fn, Args &&...args)
+    bool send_rpc_cb(Callback callback, Interface::CommandID id, Interface::Command type, TCreateFn create_fn,
+                     Args &&...args)
     {
         const auto requestId = next_request_id();
         {
@@ -38,8 +36,7 @@ class RpcClient
             m_callbacks.emplace(requestId, std::move(callback));
         }
 
-        if (m_sender.send_command(requestId, id, type, create_fn,
-                                  std::forward<Args>(args)...))
+        if (m_sender.send_command(requestId, id, type, create_fn, std::forward<Args>(args)...))
             return true;
 
         std::scoped_lock lock(m_mutex);

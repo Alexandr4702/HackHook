@@ -87,13 +87,15 @@ std::unordered_map<LPVOID, ModuleInfo> BuildModuleMap(HANDLE hProcess, MemTool &
             continue;
 
         IMAGE_DOS_HEADER dosHeader;
-        if (mem_tool.read(reinterpret_cast<uintptr_t>(baseAddress), &dosHeader, sizeof(dosHeader)) != sizeof(dosHeader) ||
+        if (mem_tool.read(reinterpret_cast<uintptr_t>(baseAddress), &dosHeader, sizeof(dosHeader)) !=
+                sizeof(dosHeader) ||
             dosHeader.e_magic != IMAGE_DOS_SIGNATURE)
             continue;
 
         IMAGE_NT_HEADERS ntHeaders;
         LPBYTE ntHeaderAddr = static_cast<LPBYTE>(baseAddress) + dosHeader.e_lfanew;
-        if (mem_tool.read(reinterpret_cast<uintptr_t>(ntHeaderAddr), &ntHeaders, sizeof(ntHeaders)) != sizeof(ntHeaders) ||
+        if (mem_tool.read(reinterpret_cast<uintptr_t>(ntHeaderAddr), &ntHeaders, sizeof(ntHeaders)) !=
+                sizeof(ntHeaders) ||
             ntHeaders.Signature != IMAGE_NT_SIGNATURE)
             continue;
 
@@ -149,7 +151,7 @@ std::vector<SectionInfo> dumpWithMapping(const std::string &filePath, HANDLE hPr
     {
         MEMORY_BASIC_INFORMATION mbi;
         size_t dumpSize = 0;
-        if (VirtualQuery( currentAddress, &mbi, sizeof(mbi)) == 0)
+        if (VirtualQuery(currentAddress, &mbi, sizeof(mbi)) == 0)
             break;
 
         std::string moduleName = "";
@@ -422,9 +424,9 @@ void MemRead(std::string out_location, MemTool &mem_tool)
     outFile << "ExitStatus,TebBaseAddress,UniqueProcess,UniqueThread,AffinityMask,Priority,BasePriority\n";
     for (auto threadInfo : threadInfos)
     {
-        outFile << threadInfo.ExitStatus << "," << threadInfo.TebBaseAddress << "," <<
-        threadInfo.ClientId.UniqueProcess << "," << threadInfo.ClientId.UniqueThread << "," <<
-        threadInfo.AffinityMask << "," << threadInfo.Priority << "," << threadInfo.BasePriority << "\n";
+        outFile << threadInfo.ExitStatus << "," << threadInfo.TebBaseAddress << "," << threadInfo.ClientId.UniqueProcess
+                << "," << threadInfo.ClientId.UniqueThread << "," << threadInfo.AffinityMask << ","
+                << threadInfo.Priority << "," << threadInfo.BasePriority << "\n";
     }
 
     LOG(MyHook::getInstance().m_log, "MemReadThread started");

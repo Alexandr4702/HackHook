@@ -1,21 +1,21 @@
 #pragma once
 
-#include "WindowSelectorCombo.h"
+#include "MemoryCache.h"
 #include "RegionViewDialog.h"
 #include "RpcClient.h"
+#include "WindowSelectorCombo.h"
 #include "common/common.h"
 #include "common/utility.h"
-#include "myhook/MemoryScanner.h"
 #include "injector/Injector.h"
+#include "myhook/MemoryScanner.h"
+#include <QMainWindow>
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <mutex>
-#include <QMainWindow>
-#include <condition_variable>
 #include <thread>
 #include <vector>
-#include "MemoryCache.h"
 
 class QPoint;
 class QCloseEvent;

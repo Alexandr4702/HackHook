@@ -146,7 +146,8 @@ bool MessageIPCSender::send(std::span<const uint8_t> bytes) noexcept
 {
     try
     {
-        if (!m_sharedBufferTx.is_initialized()) return false;
+        if (!m_sharedBufferTx.is_initialized())
+            return false;
         std::scoped_lock lck(m_mutex);
         uint32_t len = bytes.size();
         m_buffer.resize(len + sizeof(len));
@@ -185,11 +186,11 @@ void MessageIPCSender::release(bool close_buffer) noexcept
     }
 }
 
-std::string valueToString(std::span<const uint8_t> data,
-                          Interface::ValueType type)
+std::string valueToString(std::span<const uint8_t> data, Interface::ValueType type)
 {
     using namespace Interface;
-    if (data.empty()) return {};
+    if (data.empty())
+        return {};
 
     auto to_hex = [&]() -> std::string {
         std::string out;
@@ -201,59 +202,59 @@ std::string valueToString(std::span<const uint8_t> data,
 
     switch (type)
     {
-        case ValueType_Int32:
-        {
-            if (data.size() < sizeof(int32_t)) break;
-            int32_t v;
-            std::memcpy(&v, data.data(), sizeof(v));
-            return std::format("{}", v);
-        }
-
-        case ValueType_Int64:
-        {
-            if (data.size() < sizeof(int64_t)) break;
-            int64_t v;
-            std::memcpy(&v, data.data(), sizeof(v));
-            return std::format("{}", v);
-        }
-
-        case ValueType_Float:
-        {
-            if (data.size() < sizeof(float)) break;
-            float v;
-            std::memcpy(&v, data.data(), sizeof(v));
-            return std::format("{}", v);
-        }
-
-        case ValueType_Double:
-        {
-            if (data.size() < sizeof(double)) break;
-            double v;
-            std::memcpy(&v, data.data(), sizeof(v));
-            return std::format("{}", v);
-        }
-
-        case ValueType_String:
-            return std::string(reinterpret_cast<const char*>(data.data()), data.size());
-
-        case ValueType_String16:
-            return utf16_to_utf8(data);
-
-        case ValueType_ByteArray:
-            return to_hex();
-
-        default:
+    case ValueType_Int32: {
+        if (data.size() < sizeof(int32_t))
             break;
+        int32_t v;
+        std::memcpy(&v, data.data(), sizeof(v));
+        return std::format("{}", v);
+    }
+
+    case ValueType_Int64: {
+        if (data.size() < sizeof(int64_t))
+            break;
+        int64_t v;
+        std::memcpy(&v, data.data(), sizeof(v));
+        return std::format("{}", v);
+    }
+
+    case ValueType_Float: {
+        if (data.size() < sizeof(float))
+            break;
+        float v;
+        std::memcpy(&v, data.data(), sizeof(v));
+        return std::format("{}", v);
+    }
+
+    case ValueType_Double: {
+        if (data.size() < sizeof(double))
+            break;
+        double v;
+        std::memcpy(&v, data.data(), sizeof(v));
+        return std::format("{}", v);
+    }
+
+    case ValueType_String:
+        return std::string(reinterpret_cast<const char *>(data.data()), data.size());
+
+    case ValueType_String16:
+        return utf16_to_utf8(data);
+
+    case ValueType_ByteArray:
+        return to_hex();
+
+    default:
+        break;
     }
 
     return {};
 }
 
-std::string valueToString(const flatbuffers::Vector<uint8_t>* value,
-                          Interface::ValueType type)
+std::string valueToString(const flatbuffers::Vector<uint8_t> *value, Interface::ValueType type)
 {
     using namespace Interface;
-    if (!value || value->size() == 0) return {};
+    if (!value || value->size() == 0)
+        return {};
 
     std::span<const uint8_t> data(value->data(), value->size());
 
