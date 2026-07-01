@@ -19,6 +19,7 @@
 
 class QPoint;
 class QCloseEvent;
+class QTableWidget;
 class QTimer;
 
 QT_BEGIN_NAMESPACE
@@ -59,8 +60,9 @@ class MainWindow : public QMainWindow
     void showResultsContextMenu(const QPoint &position);
     void showValueWatchContextMenu(const QPoint &position);
     void showRegionWatchContextMenu(const QPoint &position);
-    void addValueWatch(const FoundOccurrences &occurrence);
-    void addRegionWatch(const FoundOccurrences &occurrence);
+    bool addValueWatch(const FoundOccurrences &occurrence, bool refresh = true);
+    bool addRegionWatch(const FoundOccurrences &occurrence, bool refresh = true);
+    void saveTable(QTableWidget *table, const QString &title);
     void refreshWatches();
     void finishWatchRequest();
     void updateValueWatchRow(size_t index, const QString &value, const QString &status);

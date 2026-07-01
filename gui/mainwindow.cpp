@@ -3,15 +3,20 @@
 #include "RegionViewDialog.h"
 #include "interface_generated.h"
 #include "ui_mainwindow.h"
-#include <QMenu>
 #include <QCloseEvent>
+#include <QFileDialog>
 #include <QHeaderView>
+#include <QMenu>
 #include <QMessageBox>
 #include <QMetaObject>
 #include <QPointer>
+#include <QSaveFile>
+#include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QTextStream>
 #include <QTime>
 #include <QTimer>
+#include <algorithm>
 #include <atomic>
 #include <charconv>
 #include <cstdint>
@@ -165,6 +170,32 @@ QString updatedStatus()
 {
     return MainWindow::tr("Updated %1").arg(QTime::currentTime().toString(QStringLiteral("HH:mm:ss")));
 }
+
+void preserveOrSelectContextRow(QTableWidget *table, int row)
+{
+    if (row < 0 || table->selectionModel()->isRowSelected(row, QModelIndex{}))
+        return;
+
+    table->clearSelection();
+    table->selectRow(row);
+}
+
+std::vector<int> selectedTableRows(QTableWidget *table)
+{
+    std::vector<int> rows;
+    const auto indexes = table->selectionModel()->selectedRows();
+    rows.reserve(static_cast<size_t>(indexes.size()));
+    for (const auto &index : indexes)
+        rows.push_back(index.row());
+    std::ranges::sort(rows);
+    return rows;
+}
+
+QString csvCell(QString value)
+{
+    value.replace('"', QStringLiteral("\"\""));
+    return QStringLiteral("\"") + value + QStringLiteral("\"");
+}
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow), m_rpc_client(m_sender)
@@ -175,12 +206,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     ui->dumpButton->setEnabled(false);
     ui->resultsTable->setContextMenuPolicy(Qt::CustomContextMenu);
     ui->resultsTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    ui->resultsTable->setSelectionMode(QAbstractItemView::ExtendedSelection);
     connect(ui->resultsTable, &QTableWidget::customContextMenuRequested, this, &MainWindow::showResultsContextMenu);
     for (auto *table : {ui->valueWatchTable, ui->regionWatchTable})
     {
         table->setContextMenuPolicy(Qt::CustomContextMenu);
         table->setSelectionBehavior(QAbstractItemView::SelectRows);
-        table->setSelectionMode(QAbstractItemView::SingleSelection);
+        table->setSelectionMode(QAbstractItemView::ExtendedSelection);
         table->horizontalHeader()->setStretchLastSection(true);
     }
     connect(ui->valueWatchTable, &QTableWidget::customContextMenuRequested, this,
@@ -857,39 +889,68 @@ void MainWindow::on_clearButton_clicked()
 void MainWindow::showResultsContextMenu(const QPoint &position)
 {
     auto *clickedItem = ui->resultsTable->itemAt(position);
-    if (!clickedItem)
-        return;
+    const int clickedRow = clickedItem ? clickedItem->row() : -1;
+    preserveOrSelectContextRow(ui->resultsTable, clickedRow);
 
-    const int row = clickedItem->row();
-    auto *valueItem = ui->resultsTable->item(row, 0);
-    if (!valueItem)
-        return;
+    const auto rows = selectedTableRows(ui->resultsTable);
+    std::vector<FoundOccurrences> selectedOccurrences;
+    selectedOccurrences.reserve(rows.size());
+    for (const int row : rows)
+    {
+        auto *valueItem = ui->resultsTable->item(row, 0);
+        if (!valueItem)
+            continue;
+        selectedOccurrences.push_back({
+            .baseAddress = valueItem->data(baseAddressRole).toULongLong(),
+            .offset = valueItem->data(offsetRole).toULongLong(),
+            .region_size = valueItem->data(regionSizeRole).toULongLong(),
+            .data_size = valueItem->data(dataSizeRole).toULongLong(),
+            .type = valueItem->data(valueTypeRole).toInt(),
+        });
+    }
 
-    FoundOccurrences occurrence{
-        .baseAddress = valueItem->data(baseAddressRole).toULongLong(),
-        .offset = valueItem->data(offsetRole).toULongLong(),
-        .region_size = valueItem->data(regionSizeRole).toULongLong(),
-        .data_size = valueItem->data(dataSizeRole).toULongLong(),
-        .type = valueItem->data(valueTypeRole).toInt(),
-    };
-
-    ui->resultsTable->selectRow(row);
     QMenu menu(this);
     QAction *viewRegionAction = menu.addAction(tr("View region"));
-    QAction *addValueWatchAction = menu.addAction(tr("Add value to watch"));
-    QAction *addRegionWatchAction = menu.addAction(tr("Add region to watch"));
-    viewRegionAction->setEnabled(m_hookReady && !m_unhookPending && m_injector.isHooked());
+    QAction *addValueWatchAction = menu.addAction(selectedOccurrences.size() > 1
+                                                       ? tr("Add selected values to watch")
+                                                       : tr("Add value to watch"));
+    QAction *addRegionWatchAction = menu.addAction(selectedOccurrences.size() > 1
+                                                        ? tr("Add selected regions to watch")
+                                                        : tr("Add region to watch"));
+    menu.addSeparator();
+    QAction *saveAction = menu.addAction(tr("Save table as CSV..."));
+    viewRegionAction->setEnabled(clickedRow >= 0 && m_hookReady && !m_unhookPending && m_injector.isHooked());
+    addValueWatchAction->setEnabled(!selectedOccurrences.empty());
+    addRegionWatchAction->setEnabled(!selectedOccurrences.empty());
     QAction *selectedAction = menu.exec(ui->resultsTable->viewport()->mapToGlobal(position));
     if (selectedAction == addValueWatchAction)
     {
-        addValueWatch(occurrence);
+        bool added = false;
+        for (const auto &occurrence : selectedOccurrences)
+            added = addValueWatch(occurrence, false) || added;
+        if (added)
+            refreshWatches();
     }
     else if (selectedAction == addRegionWatchAction)
     {
-        addRegionWatch(occurrence);
+        bool added = false;
+        for (const auto &occurrence : selectedOccurrences)
+            added = addRegionWatch(occurrence, false) || added;
+        if (added)
+            refreshWatches();
     }
     else if (selectedAction == viewRegionAction)
     {
+        auto *valueItem = ui->resultsTable->item(clickedRow, 0);
+        if (!valueItem)
+            return;
+        FoundOccurrences occurrence{
+            .baseAddress = valueItem->data(baseAddressRole).toULongLong(),
+            .offset = valueItem->data(offsetRole).toULongLong(),
+            .region_size = valueItem->data(regionSizeRole).toULongLong(),
+            .data_size = valueItem->data(dataSizeRole).toULongLong(),
+            .type = valueItem->data(valueTypeRole).toInt(),
+        };
         std::vector<FoundOccurrences> regionOccurrences;
         const uint64_t regionBase = occurrence.baseAddress;
         const uint64_t regionSize = occurrence.region_size;
@@ -914,9 +975,13 @@ void MainWindow::showResultsContextMenu(const QPoint &position)
             regionOccurrences.push_back(occurrence);
         viewRegion(occurrence, std::move(regionOccurrences));
     }
+    else if (selectedAction == saveAction)
+    {
+        saveTable(ui->resultsTable, tr("scan results"));
+    }
 }
 
-void MainWindow::addValueWatch(const FoundOccurrences &occurrence)
+bool MainWindow::addValueWatch(const FoundOccurrences &occurrence, bool refresh)
 {
     const uint64_t address = occurrence.baseAddress + occurrence.offset;
     const auto duplicate = std::ranges::find_if(m_valueWatches, [address](const FoundOccurrences &entry) {
@@ -925,15 +990,17 @@ void MainWindow::addValueWatch(const FoundOccurrences &occurrence)
     if (duplicate != m_valueWatches.end())
     {
         ui->valueWatchTable->selectRow(static_cast<int>(std::distance(m_valueWatches.begin(), duplicate)));
-        return;
+        return false;
     }
 
     m_valueWatches.push_back(occurrence);
     updateValueWatchRow(m_valueWatches.size() - 1, QStringLiteral("-"), tr("Pending"));
-    refreshWatches();
+    if (refresh)
+        refreshWatches();
+    return true;
 }
 
-void MainWindow::addRegionWatch(const FoundOccurrences &occurrence)
+bool MainWindow::addRegionWatch(const FoundOccurrences &occurrence, bool refresh)
 {
     const auto duplicate = std::ranges::find_if(m_regionWatches, [&occurrence](const RegionWatch &entry) {
         return entry.occurrence.baseAddress == occurrence.baseAddress;
@@ -941,57 +1008,180 @@ void MainWindow::addRegionWatch(const FoundOccurrences &occurrence)
     if (duplicate != m_regionWatches.end())
     {
         ui->regionWatchTable->selectRow(static_cast<int>(std::distance(m_regionWatches.begin(), duplicate)));
-        return;
+        return false;
     }
 
     m_regionWatches.push_back(RegionWatch{occurrence, {}});
     updateRegionWatchRow(m_regionWatches.size() - 1, nullptr, tr("Pending"));
-    refreshWatches();
+    if (refresh)
+        refreshWatches();
+    return true;
 }
 
 void MainWindow::showValueWatchContextMenu(const QPoint &position)
 {
     auto *item = ui->valueWatchTable->itemAt(position);
-    if (!item)
-        return;
+    const int clickedRow = item ? item->row() : -1;
+    preserveOrSelectContextRow(ui->valueWatchTable, clickedRow);
+    auto rows = selectedTableRows(ui->valueWatchTable);
 
-    const int row = item->row();
     QMenu menu(this);
-    QAction *removeAction = menu.addAction(tr("Remove from watch"));
-    if (menu.exec(ui->valueWatchTable->viewport()->mapToGlobal(position)) != removeAction)
-        return;
-    if (row < 0 || static_cast<size_t>(row) >= m_valueWatches.size())
-        return;
+    QAction *viewAction = menu.addAction(tr("View region"));
+    QAction *addRegionWatchAction = menu.addAction(rows.size() > 1
+                                                        ? tr("Add selected regions to watch")
+                                                        : tr("Add region to watch"));
+    QAction *removeAction = menu.addAction(rows.size() > 1 ? tr("Remove selected from watch")
+                                                           : tr("Remove from watch"));
+    viewAction->setEnabled(clickedRow >= 0 && static_cast<size_t>(clickedRow) < m_valueWatches.size() &&
+                           m_hookReady && !m_unhookPending && m_injector.isHooked());
+    addRegionWatchAction->setEnabled(!rows.empty());
+    removeAction->setEnabled(!rows.empty());
+    menu.addSeparator();
+    QAction *saveAction = menu.addAction(tr("Save table as CSV..."));
+    QAction *selectedAction = menu.exec(ui->valueWatchTable->viewport()->mapToGlobal(position));
+    if (selectedAction == viewAction)
+    {
+        const auto occurrence = m_valueWatches[static_cast<size_t>(clickedRow)];
+        std::vector<FoundOccurrences> regionOccurrences;
+        for (const auto &candidate : m_valueWatches)
+        {
+            const uint64_t address = candidate.baseAddress + candidate.offset;
+            if (address < candidate.baseAddress || address < occurrence.baseAddress)
+                continue;
 
-    m_valueWatches.erase(m_valueWatches.begin() + row);
-    ui->valueWatchTable->removeRow(row);
+            const uint64_t relativeOffset = address - occurrence.baseAddress;
+            if (relativeOffset >= occurrence.region_size ||
+                candidate.data_size > occurrence.region_size - relativeOffset)
+                continue;
+
+            FoundOccurrences normalized = candidate;
+            normalized.baseAddress = occurrence.baseAddress;
+            normalized.offset = relativeOffset;
+            normalized.region_size = occurrence.region_size;
+            regionOccurrences.push_back(normalized);
+        }
+        if (regionOccurrences.empty())
+            regionOccurrences.push_back(occurrence);
+        viewRegion(occurrence, std::move(regionOccurrences));
+    }
+    else if (selectedAction == addRegionWatchAction)
+    {
+        bool added = false;
+        for (const int row : rows)
+        {
+            if (row < 0 || static_cast<size_t>(row) >= m_valueWatches.size())
+                continue;
+            added = addRegionWatch(m_valueWatches[static_cast<size_t>(row)], false) || added;
+        }
+        if (added)
+            refreshWatches();
+    }
+    else if (selectedAction == saveAction)
+    {
+        saveTable(ui->valueWatchTable, tr("value watch"));
+    }
+    else if (selectedAction == removeAction)
+    {
+        std::ranges::sort(rows, std::greater{});
+        for (const int row : rows)
+        {
+            if (row < 0 || static_cast<size_t>(row) >= m_valueWatches.size())
+                continue;
+            m_valueWatches.erase(m_valueWatches.begin() + row);
+            ui->valueWatchTable->removeRow(row);
+        }
+    }
 }
 
 void MainWindow::showRegionWatchContextMenu(const QPoint &position)
 {
     auto *item = ui->regionWatchTable->itemAt(position);
-    if (!item)
-        return;
-
-    const int row = item->row();
-    if (row < 0 || static_cast<size_t>(row) >= m_regionWatches.size())
-        return;
+    const int clickedRow = item ? item->row() : -1;
+    preserveOrSelectContextRow(ui->regionWatchTable, clickedRow);
+    auto rows = selectedTableRows(ui->regionWatchTable);
 
     QMenu menu(this);
     QAction *viewAction = menu.addAction(tr("View region"));
-    QAction *removeAction = menu.addAction(tr("Remove from watch"));
-    viewAction->setEnabled(m_hookReady && !m_unhookPending && m_injector.isHooked());
+    QAction *removeAction = menu.addAction(rows.size() > 1 ? tr("Remove selected from watch")
+                                                           : tr("Remove from watch"));
+    menu.addSeparator();
+    QAction *saveAction = menu.addAction(tr("Save table as CSV..."));
+    viewAction->setEnabled(clickedRow >= 0 && static_cast<size_t>(clickedRow) < m_regionWatches.size() &&
+                           m_hookReady && !m_unhookPending && m_injector.isHooked());
+    removeAction->setEnabled(!rows.empty());
     QAction *selectedAction = menu.exec(ui->regionWatchTable->viewport()->mapToGlobal(position));
     if (selectedAction == viewAction)
     {
-        const auto occurrence = m_regionWatches[static_cast<size_t>(row)].occurrence;
+        const auto occurrence = m_regionWatches[static_cast<size_t>(clickedRow)].occurrence;
         viewRegion(occurrence, {occurrence});
     }
     else if (selectedAction == removeAction)
     {
-        m_regionWatches.erase(m_regionWatches.begin() + row);
-        ui->regionWatchTable->removeRow(row);
+        std::ranges::sort(rows, std::greater{});
+        for (const int row : rows)
+        {
+            if (row < 0 || static_cast<size_t>(row) >= m_regionWatches.size())
+                continue;
+            m_regionWatches.erase(m_regionWatches.begin() + row);
+            ui->regionWatchTable->removeRow(row);
+        }
     }
+    else if (selectedAction == saveAction)
+    {
+        saveTable(ui->regionWatchTable, tr("region watch"));
+    }
+}
+
+void MainWindow::saveTable(QTableWidget *table, const QString &title)
+{
+    QString fileName = QFileDialog::getSaveFileName(this, tr("Save %1").arg(title),
+                                                    title + QStringLiteral(".csv"),
+                                                    tr("CSV files (*.csv);;All files (*)"));
+    if (fileName.isEmpty())
+        return;
+    if (!fileName.endsWith(QStringLiteral(".csv"), Qt::CaseInsensitive))
+        fileName += QStringLiteral(".csv");
+
+    QSaveFile file(fileName);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+    {
+        QMessageBox::warning(this, tr("Save table"),
+                             tr("Could not open the file for writing:\n%1").arg(file.errorString()));
+        return;
+    }
+
+    QTextStream stream(&file);
+    stream << QChar(0xfeff);
+    for (int column = 0; column < table->columnCount(); ++column)
+    {
+        if (column != 0)
+            stream << ',';
+        const auto *header = table->horizontalHeaderItem(column);
+        stream << csvCell(header ? header->text() : QString{});
+    }
+    stream << '\n';
+
+    for (int row = 0; row < table->rowCount(); ++row)
+    {
+        for (int column = 0; column < table->columnCount(); ++column)
+        {
+            if (column != 0)
+                stream << ',';
+            const auto *item = table->item(row, column);
+            stream << csvCell(item ? item->text() : QString{});
+        }
+        stream << '\n';
+    }
+
+    stream.flush();
+    if (stream.status() != QTextStream::Ok)
+    {
+        QMessageBox::warning(this, tr("Save table"), tr("Could not save the table:\n%1").arg(file.errorString()));
+        return;
+    }
+
+    if (!file.commit())
+        QMessageBox::warning(this, tr("Save table"), tr("Could not save the table:\n%1").arg(file.errorString()));
 }
 
 void MainWindow::updateValueWatchRow(size_t index, const QString &value, const QString &status)
